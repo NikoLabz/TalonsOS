@@ -53,6 +53,25 @@ SECTIONS
     }
 
     /*
+     * Global C++ constructors. GCC registers a function pointer here
+     * for every translation unit that has a global/static object
+     * which cannot be fully constant-initialized (e.g. one with a
+     * user-defined constructor, a reference member, or dynamic
+     * state that isn't known at compile time). This kernel is linked
+     * directly with `ld` -- no crt0/crti/crtbegin -- so nothing runs
+     * these automatically; entry.asm walks
+     * [__init_array_start, __init_array_end) itself before calling
+     * kernel_main. KEEP prevents an unused-section GC pass from ever
+     * discarding these entries.
+     */
+    .init_array : {
+        __init_array_start = .;
+        KEEP(*(SORT_BY_INIT_PRIORITY(.init_array.*)))
+        KEEP(*(.init_array))
+        __init_array_end = .;
+    }
+
+    /*
      * .bss is not stored in kernel_flat.bin, so nothing loads or
      * clears it. entry.asm zeroes [__bss_start, __bss_end) before
      * any C++ code runs.

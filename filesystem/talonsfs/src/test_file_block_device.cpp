@@ -8,8 +8,20 @@ int main()
     constexpr uint64_t blockCount = 32;
     constexpr uint32_t blockSize = 4096;
 
+    /*
+     * Generated test artifact -- lives under build/ like every other
+     * generated file in this repo, not the source tree. A prior
+     * version of this test hard-coded "talons_test.img" in the repo
+     * root; a stale image left over from an earlier run with
+     * different blockCount/blockSize silently made every later run
+     * fail, because FileBlockDevice correctly refuses to reuse an
+     * existing image whose size does not match what was requested
+     * (a fail-closed safety check, not a bug -- see
+     * FileBlockDevice::FileBlockDevice). Using a build/ path avoids
+     * that class of stale-fixture failure entirely.
+     */
     const char* imagePath =
-        "talons_test.img";
+        "build/talons_test.img";
 
     const char message[] =
         "TalonsOS survives.";

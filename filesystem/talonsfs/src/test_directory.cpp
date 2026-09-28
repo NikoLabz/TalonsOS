@@ -46,11 +46,6 @@ int main()
         nodeCount
     );
 
-    TalonsFS::NodeAllocator nodeAllocator(
-        nodeBitmap,
-        nodeCount
-    );
-
     uint8_t nodeData[
         nodeCount * sizeof(TalonsFS::Node)
     ] = {};
@@ -59,6 +54,23 @@ int main()
         nodeData,
         nodeCount
     );
+
+    TalonsFS::NodeAllocator nodeAllocator(
+        nodeBitmap,
+        nodeTable
+    );
+
+    /*
+     * Root's Node struct is written directly below, bypassing
+     * NodeAllocator. Without this, nodeBitmap never learns that
+     * index 0 (RootNode) is taken, and the very next
+     * nodeManager.create() call hands out index 0 as "free" --
+     * silently overwriting root's own Node with the new node's data.
+     * The real formatter (formatter.cpp) does exactly this same
+     * setBit(nodeBitmap, RootNode) before allocating anything else;
+     * this test previously skipped it.
+     */
+    nodeBitmap.set(TalonsFS::RootNode);
 
     TalonsFS::NodeManager nodeManager(
         nodeAllocator,
@@ -71,6 +83,24 @@ int main()
     nodeTable.write(
         TalonsFS::RootNode,
         root
+    );
+
+    /*
+     * The real formatter and kernel/filesystem.cpp ALWAYS create the
+     * root node through nodeManager->create(), which marks it
+     * allocated in the node bitmap as a side effect. This test writes
+     * the root node directly into the table instead (to keep the
+     * fixture minimal), which skips that bookkeeping: bit 0 of
+     * nodeBitmap is left clear. The very next nodeManager.create()
+     * call below then legitimately hands out node 0 -- the "first
+     * free" node, since nothing marked it otherwise -- colliding with
+     * and overwriting the root node just constructed above.
+     *
+     * Mark it allocated explicitly to match the invariant every real
+     * code path maintains.
+     */
+    nodeBitmap.set(
+        TalonsFS::RootNode
     );
 
     int64_t fileNode =

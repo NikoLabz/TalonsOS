@@ -7,6 +7,11 @@ extern kernel_main
 extern __bss_start
 extern __bss_end
 
+; Provided by linker.ld: the boundaries of the .init_array table of
+; global C++ constructor function pointers.
+extern __init_array_start
+extern __init_array_end
+
 ; ============================================================
 ; TALONSOS x86-64 KERNEL ENTRY
 ; ============================================================
@@ -252,6 +257,43 @@ long_mode:
     ; ========================================================
 
     mov word [qword 0xB8002], 0x074C
+
+
+    ; ========================================================
+    ; RUN GLOBAL C++ CONSTRUCTORS
+    ; ========================================================
+    ; This kernel is linked directly with `ld` (no crt0/crti/
+    ; crtbegin, no libc startup), so nothing else calls the
+    ; constructors GCC records in .init_array for global/static
+    ; objects that cannot be constant-initialized (a user-defined
+    ; constructor, a reference member, ...).
+    ;
+    ; Without this, such an object is left exactly as the .bss-zero
+    ; pass above wrote it: an all-zero vtable pointer and any
+    ; reference members bound to nothing. The first virtual call
+    ; on it loads a function pointer from the IVT at address 0 and
+    ; triple-faults.
+    ;
+    ; Each entry in [__init_array_start, __init_array_end) is an
+    ; 8-byte function pointer; call every one in order. rbx and r12
+    ; are callee-saved under the SysV ABI, so the loop state
+    ; survives each constructor.
+
+    mov rbx, __init_array_start
+    mov r12, __init_array_end
+
+.run_ctors:
+
+    cmp rbx, r12
+    jae .ctors_done
+
+    call [rbx]
+
+    add rbx, 8
+    jmp .run_ctors
+
+.ctors_done:
+
 
     ; ========================================================
     ; CALL C++ KERNEL

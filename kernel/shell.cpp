@@ -103,9 +103,86 @@ namespace
         terminal_set_output_position(position);
     }
 
+    /*
+     * Print "<prefix>: <reason>" using the structured error recorded
+     * by the last filesystem_* call. Without this the shell threw the
+     * error enum away and every failure looked identical.
+     */
+    void print_fs_error(const char* prefix)
+    {
+        print_string(prefix);
+        print_string(": ");
+        print_string(
+            filesystem_error_string(
+                filesystem_get_last_error()));
+        print_string("\n");
+    }
+
+    // Append "  reason: <structured error>" after flavour text, so the
+    // personality of a message is kept but the cause is still visible.
+    void print_fs_reason()
+    {
+        print_string("  reason: ");
+        print_string(
+            filesystem_error_string(
+                filesystem_get_last_error()));
+        print_string("\n");
+    }
+
     static inline void outb(uint16_t port, uint8_t val)
     {
         asm volatile ( "outb %0, %1" : : "a"(val), "Nd"(port) );
+    }
+
+    static inline uint8_t inb(uint16_t port)
+    {
+        uint8_t val;
+        asm volatile ( "inb %1, %0" : "=a"(val) : "Nd"(port) );
+        return val;
+    }
+
+    /*
+     * Reset the machine.
+     *
+     * The 8042 keyboard controller only latches a command byte when its
+     * input buffer is empty (status port 0x64, bit 1 == 0). Writing 0xFE
+     * while the buffer is full silently drops the pulse and the machine
+     * keeps running. Drain it first, with a bounded spin so a wedged or
+     * absent controller cannot hang the kernel.
+     *
+     * If the pulse does not take effect, fall back to a deliberate triple
+     * fault: load a zero-length IDT and raise an interrupt. The CPU cannot
+     * dispatch it, cannot dispatch the resulting #GP, and resets.
+     */
+    [[noreturn]] static void reboot_machine()
+    {
+        for (uint32_t i = 0; i < 100000; ++i)
+        {
+            if ((inb(0x64) & 0x02) == 0)
+            {
+                break;
+            }
+        }
+
+        outb(0x64, 0xFE);
+
+        // Give the controller a moment to assert the reset line.
+        for (uint32_t i = 0; i < 1000000; ++i)
+        {
+            asm volatile ("pause");
+        }
+
+        // Fallback: forced triple fault.
+        struct [[gnu::packed]] { uint16_t limit; uint64_t base; }
+            nullIdt = { 0, 0 };
+
+        asm volatile ("lidt %0" : : "m"(nullIdt));
+        asm volatile ("int $0x03");
+
+        for (;;)
+        {
+            asm volatile ("hlt");
+        }
     }
 }
 
@@ -135,7 +212,7 @@ extern "C" void shell_handle_line(const char* line)
         if (!copy_trimmed_argument(arg, name, kfs::MAX_NAME_LEN)) print_string("MakeItYourself>:( : missing directory name\n");
         else if (!filesystem_is_mounted()) print_string("TalonsFS mount failed\n");
         else if (filesystem_create_directory(name)) { print_string("Created: "); print_string(name); print_string("\n"); }
-        else print_string("MakeItYourself>:( failed\n");
+        else print_fs_error("MakeItYourself>:(");
     }
     else if (command_matches(line, "DontTouchMe", &arg))
     {
@@ -143,7 +220,7 @@ extern "C" void shell_handle_line(const char* line)
         if (!copy_trimmed_argument(arg, name, kfs::MAX_NAME_LEN)) print_string("DontTouchMe : missing file name\n");
         else if (!filesystem_is_mounted()) print_string("TalonsFS mount failed\n");
         else if (filesystem_create_file(name)) { print_string("Created: "); print_string(name); print_string("\n"); }
-        else print_string("DontTouchMe failed\n");
+        else print_fs_error("DontTouchMe");
     }
     
     else if (command_matches(line, "RandomFZ!@MultigranualRice", &arg))
@@ -152,7 +229,7 @@ extern "C" void shell_handle_line(const char* line)
         if (!copy_trimmed_argument(arg, name, kfs::MAX_NAME_LEN)) print_string("RandomFZ!@MultigranualRice : missing name\n");
         else if (!filesystem_is_mounted()) print_string("TalonsFS mount failed\n");
         else if (filesystem_remove(name)) print_string("The rice has been cosumed\n");
-        else print_string("The rice has been cooked beyond operational limits\n");
+        else { print_string("The rice has been cooked beyond operational limits\n"); print_fs_reason(); }
     }
 
     else if (command_matches(line, "Crazy@protien", &arg))
@@ -168,7 +245,7 @@ extern "C" void shell_handle_line(const char* line)
         if (!copy_trimmed_argument(dst, dst_name, kfs::MAX_NAME_LEN)) print_string("Crazy@protien : missing destination\n");
         else if (!filesystem_is_mounted()) print_string("TalonsFS mount failed\n");
         else if (filesystem_copy(src, dst_name)) { print_string("Copied "); print_string(src); print_string(" to "); print_string(dst_name); print_string("\n"); }
-        else print_string("Crazy@protien failed\n");
+        else print_fs_error("Crazy@protien");
     }
     else if (command_matches(line, "MoveItYourself>:(", &arg))
     {
@@ -183,7 +260,7 @@ extern "C" void shell_handle_line(const char* line)
         if (!copy_trimmed_argument(dst, dst_name, kfs::MAX_NAME_LEN)) print_string("MoveItYourself>:( : missing destination\n");
         else if (!filesystem_is_mounted()) print_string("TalonsFS mount failed\n");
         else if (filesystem_move(src, dst_name)) { print_string("Moved "); print_string(src); print_string(" to "); print_string(dst_name); print_string("\n"); }
-        else print_string("MoveItYourself>:( failed\n");
+        else print_fs_error("MoveItYourself>:(");
     }
     else if (command_matches(line, "KittysAreSoft!", &arg))
     {
@@ -194,7 +271,7 @@ extern "C" void shell_handle_line(const char* line)
         {
             static uint8_t fileBuffer[kfs::MAX_FILE_READ_BYTES];
             uint64_t size = 0;
-            if (!filesystem_read_file(name, fileBuffer, kfs::MAX_FILE_READ_BYTES, &size)) print_string("The cat couldnt find the file. Have you triend shaking the box?\n");
+            if (!filesystem_read_file(name, fileBuffer, kfs::MAX_FILE_READ_BYTES, &size)) { print_string("The cat couldnt find the file. Have you triend shaking the box?\n"); print_fs_reason(); }
             else { print_bytes(fileBuffer, size); print_string("\n"); }
         }
     } 
@@ -254,7 +331,7 @@ extern "C" void shell_handle_line(const char* line)
         // Prompt says "write supplied text", let's keep it as is.
         if (!filesystem_is_mounted()) print_string("TalonsFS mount failed\n");
         else if (filesystem_write_file(name, reinterpret_cast<const uint8_t*>(text), textLen)) { print_string("Wrote to "); print_string(name); print_string("\n"); }
-        else print_string("WhyIsItEchoing?@Here failed\n");
+        else print_fs_error("WhyIsItEchoing?@Here");
     }
    
 	else if (command_matches(
@@ -278,9 +355,22 @@ extern "C" void shell_handle_line(const char* line)
 
 	else if (command_matches(line, "Byebye!", &arg))
     {
+        /*
+         * The BlockCache is write-back, so a bare reboot discards every
+         * dirty entry. Unmount (which flushes the cache to the platter)
+         * before resetting, and say so if it fails -- silently rebooting
+         * over unflushed metadata is how filesystems get corrupted.
+         */
+        if (filesystem_is_mounted())
+        {
+            if (!filesystem_unmount())
+            {
+                print_string("WARNING: unmount failed; cached data may be lost\n");
+            }
+        }
+
         print_string("Rebooting...\n");
-        outb(0x64, 0xFE); // Reboot via keyboard controller
-        while(1) asm volatile("hlt");
+        reboot_machine();
     }
    
         else if (command_matches(line, "FormatTheEagle!@Disk", &arg))

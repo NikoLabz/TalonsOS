@@ -1,6 +1,7 @@
 #include "talonsfs/superblock_utils.h"
 #include "filesystem.h"
 #include "block_device.h"
+#include "block_cache.h"
 
 #include <new>
 #include <stdint.h>
@@ -27,7 +28,8 @@ namespace
     constexpr uint64_t BLOCK_BITMAP_CAPACITY_BLOCKS = 16;
     constexpr uint64_t NODE_BITMAP_CAPACITY_BLOCKS = 4;
 
-    KernelBlockDevice device;
+    KernelBlockDevice physicalDevice;
+    BlockCache device(physicalDevice);
 
     TalonsFS::Superblock superblock{};
     TalonsFS::FilesystemLayout layout{};
@@ -882,6 +884,27 @@ bool filesystem_init()
         return false;
     }
 
+    /*
+     * Every field checked above is cross-validated against layout
+     * independently recomputed from totalBlocks/blockSize, which
+     * catches structural corruption. It does NOT cover fields with no
+     * independent source of truth to check against -- freeBlocks,
+     * freeNodes, and filesystemID -- nor does it catch the case where
+     * several fields are corrupted together in a way that happens to
+     * stay self-consistent. The checksum, written by
+     * filesystem_format() over the whole superblock, is the only
+     * check that covers those bytes.
+     */
+    if (TalonsFS::calculateSuperblockChecksum(superblock) !=
+        superblock.checksum)
+    {
+        setFilesystemError(
+            FilesystemError::CorruptFilesystem
+        );
+
+        return false;
+    }
+
     if (layout.nodeTableBlocks >
         NODE_TABLE_CAPACITY_BLOCKS)
     {
@@ -1078,6 +1101,20 @@ bool filesystem_unmount()
         return false;
     }
 
+    /*
+     * flushMetadata() only writes into the BlockCache, which is
+     * write-back: without this the metadata (and any file data
+     * still held in dirty entries) never reaches the platter.
+     */
+    if (!device.flush())
+    {
+        setFilesystemError(
+            FilesystemError::DeviceError
+        );
+
+        return false;
+    }
+
     mounted = false;
 
     directoryStackDepth = 0;
@@ -1099,6 +1136,32 @@ bool filesystem_is_mounted()
 FilesystemError filesystem_get_last_error()
 {
     return lastFilesystemError;
+}
+
+const char* filesystem_error_string(
+    FilesystemError error)
+{
+    switch (error)
+    {
+        case FilesystemError::None:              return "no error";
+        case FilesystemError::NotMounted:        return "filesystem not mounted";
+        case FilesystemError::InvalidArgument:   return "invalid argument";
+        case FilesystemError::NotFound:          return "not found";
+        case FilesystemError::AlreadyExists:     return "already exists";
+        case FilesystemError::NotAFile:          return "not a file";
+        case FilesystemError::NotADirectory:     return "not a directory";
+        case FilesystemError::DirectoryNotEmpty: return "directory not empty";
+        case FilesystemError::NoSpace:           return "no space left";
+        case FilesystemError::InvalidFilesystem: return "invalid filesystem";
+        case FilesystemError::CorruptFilesystem: return "corrupt filesystem";
+        case FilesystemError::DeviceError:       return "device error";
+        case FilesystemError::MetadataError:     return "metadata error";
+        case FilesystemError::RecoveryError:     return "recovery error";
+        case FilesystemError::AlreadyUnmounted:  return "already unmounted";
+        case FilesystemError::Unknown:           return "unknown error";
+    }
+
+    return "unknown error";
 }
 
 bool filesystem_format()
@@ -1334,6 +1397,29 @@ bool filesystem_format()
     }
 
     /*
+     * ORDERING BARRIER.
+     *
+     * flushMetadata() only populates the write-back cache. Without
+     * this the cache's round-robin eviction is free to push the
+     * superblock (written below) to the platter BEFORE the metadata,
+     * because eviction order follows entry index, not write order.
+     * A power loss in that window leaves a valid-looking superblock
+     * describing metadata that was never written -- the exact failure
+     * the "superblock last" rule exists to prevent.
+     *
+     * Draining the cache here restores the guarantee at the physical
+     * device without disabling caching anywhere else.
+     */
+    if (!device.flush())
+    {
+        setFilesystemError(
+            FilesystemError::DeviceError
+        );
+
+        return false;
+    }
+
+    /*
      * Write the superblock last so that the filesystem
      * is not advertised as valid until its metadata exists.
      */
@@ -1348,6 +1434,19 @@ bool filesystem_format()
     if (!device.writeBlock(
             layout.superblockBlock,
             sbBuffer))
+    {
+        setFilesystemError(
+            FilesystemError::DeviceError
+        );
+
+        return false;
+    }
+
+    /*
+     * Commit the superblock too, so that a format which reports
+     * success has actually reached the disk.
+     */
+    if (!device.flush())
     {
         setFilesystemError(
             FilesystemError::DeviceError
@@ -1630,6 +1729,10 @@ if (!appendDirectoryEntry(
         static_cast<uint64_t>(newNode)
     );
 
+    setFilesystemError(
+        FilesystemError::NoSpace
+    );
+
     return false;
 }
 
@@ -1802,6 +1905,10 @@ if (!findDirectoryEntry(
         name,
         entry))
 {
+    setFilesystemError(
+        FilesystemError::NotFound
+    );
+
     return false;
 }
 
@@ -2116,8 +2223,13 @@ bool filesystem_remove(
 
         if (dir.size > 0)
         {
+            /*
+             * The target IS a directory -- it just is not empty.
+             * Reporting NotADirectory here told the caller the exact
+             * opposite of the truth.
+             */
             setFilesystemError(
-                FilesystemError::NotADirectory
+                FilesystemError::DirectoryNotEmpty
             );
 
             return false;
@@ -2251,7 +2363,18 @@ bool filesystem_copy(
             sizeof(buffer),
             &size))
     {
+        /*
+         * Capture the real cause BEFORE rolling back: every public
+         * filesystem_* entry point resets lastFilesystemError to None
+         * on entry, so filesystem_remove() would otherwise erase the
+         * error we are about to report and the caller would see None.
+         */
+        const FilesystemError cause = lastFilesystemError;
+
         filesystem_remove(dst);
+
+        setFilesystemError(cause);
+
         return false;
     }
 
@@ -2260,7 +2383,12 @@ bool filesystem_copy(
             buffer,
             static_cast<uint32_t>(size)))
     {
+        const FilesystemError cause = lastFilesystemError;
+
         filesystem_remove(dst);
+
+        setFilesystemError(cause);
+
         return false;
     }
 

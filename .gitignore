@@ -1,0 +1,8 @@
+# Build output
+/build/
+
+# Generated disk images
+*.img
+
+# Local backup archives
+*.tar.gz

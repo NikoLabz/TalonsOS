@@ -25,6 +25,7 @@ enum class FilesystemError
     AlreadyExists,
     NotAFile,
     NotADirectory,
+    DirectoryNotEmpty,
     NoSpace,
     InvalidFilesystem,
     CorruptFilesystem,
@@ -42,6 +43,12 @@ bool filesystem_unmount();
 bool filesystem_is_mounted();
 
 FilesystemError filesystem_get_last_error();
+
+/*
+ * Human-readable name for a FilesystemError. Always returns a valid
+ * static string, never nullptr, so callers can print it directly.
+ */
+const char* filesystem_error_string(FilesystemError error);
 
 bool filesystem_format();
 
