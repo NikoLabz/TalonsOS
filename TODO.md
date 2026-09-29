@@ -45,30 +45,88 @@
 
 # ⌨ PHASE 2 - TERMINAL & SHELL
 
-* [ ] Improve keyboard handling
-* [ ] Backspace support *(basic backspace already works in terminal_run(); revisit for edge cases)*
-* [ ] Arrow-key support
-* [ ] Command history
+## KEYBOARD & INPUT
+
+* [x] Basic keyboard handling
+* [x] Backspace support
+* [ ] Left/right arrow-key support
+* [x] Up/down arrow-key support
 * [ ] Better cursor movement
 * [ ] Home/End support
 * [ ] Delete key support
-* [ ] Screen clearing
-* [ ] Terminal scrolling *(scroll-on-overflow already implemented in vga_scroll(); revisit for a dedicated clear command)*
-* [ ] Better command parsing
-* [x] Command arguments *(command_matches()/copy_trimmed_argument() in shell.cpp already parse trailing arguments)*
+* [x] Input length protection
+* [ ] Text insertion at cursor
+* [ ] Text deletion at cursor
+* [ ] Improved input editing
+
+## COMMAND HISTORY
+
+* [x] Command history
+* [x] History navigation
+* [x] History editing
+* [x] Restore partially typed command after history navigation
+* [ ] History improvements / edge cases
+
+## TERMINAL
+
+* [x] Cursor positioning
+* [x] Hardware cursor updates
+* [x] Screen clearing internally
+* [x] Terminal scrolling
+* [ ] Built-in clear command
+* [ ] Improved terminal redraw behaviour
+
+## COMMAND PARSING
+
+* [x] Basic command parsing
+* [x] Command arguments
 * [ ] Command flags/options
+* [ ] Quoted arguments
+* [ ] Improved whitespace handling
+* [ ] Command parsing errors
+
+## BUILT-IN COMMANDS
+
 * [ ] Built-in help command
 * [ ] Built-in version command
 * [ ] Built-in clear command
-* [ ] Built-in reboot command
+* [x] Built-in reboot command
 * [ ] Built-in shutdown command
-* [ ] Shell error messages *(basic "X failed" messages exist per-command; revisit for consistency)*
-* [ ] Shell command registry *(commands are currently a hardcoded if/else chain in shell_handle_line(); a real registry is still open)*
+* [ ] More TalonsOS system commands
+
+## SHELL ERRORS
+
+* [x] Basic command failure messages
+* [x] Structured filesystem error reporting
+* [ ] Standardised shell error messages
+* [ ] Standardised command return/error codes
+* [ ] Unknown-command handling
+
+## COMMAND SYSTEM
+
+* [ ] Shell command registry
+* [ ] Command execution framework
 * [ ] Command aliases
 * [ ] Tab completion
+* [ ] Command metadata/help descriptions
+
+## SHELL ENVIRONMENT
+
 * [ ] Shell environment variables
-* [ ] Command execution framework
-* [ ] Standardised command return/error codes
+* [ ] Variable lookup
+* [ ] Variable expansion
+* [ ] Basic shell configuration
+
+## PHASE 2 COMPLETION
+
+* [ ] Complete terminal input editing
+* [ ] Complete command parser
+* [ ] Complete command registry
+* [ ] Complete built-in command system
+* [ ] Complete shell error handling
+* [ ] Complete command completion
+* [ ] Complete shell environment
+* [ ] Full Phase 2 test pass
 
 ---
 
@@ -118,15 +176,15 @@
 * [x] Filesystem unmounting
 * [x] In-OS filesystem formatting
 * [x] Basic filesystem recovery
-* [ ] Structured filesystem error handling
-* [ ] Filesystem caching
-* [ ] Filesystem buffering
+* [x] Structured filesystem error handling
+* [x] Filesystem caching
+* [x] Filesystem buffering
 
 ## DOCUMENTATION
 
-* [ ] TalonsFS specification
-* [ ] TalonsFS disk format documentation
-* [ ] TalonsFS developer documentation
+* [x] TalonsFS specification
+* [x] TalonsFS disk format documentation
+* [x] TalonsFS developer documentation
 
 > **Current focus:** Filesystem integrity.
 >
@@ -139,13 +197,13 @@
 
 # 📄 PHASE 4 - FILE HANDLING
 
-* [ ] Implement basic text files
+* [x] Implement basic text files
 * [ ] Implement binary files
-* [ ] Implement file handles
-* [ ] Implement file descriptors
-* [ ] Implement open()
-* [ ] Implement close()
-* [ ] Implement read()
+* [x] Implement file handles
+* [x] Implement file descriptors
+* [x] Implement open()
+* [x] Implement close()
+* [x] Implement read()
 * [ ] Implement write()
 * [ ] Implement seek()
 * [ ] Implement file size queries

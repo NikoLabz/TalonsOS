@@ -1,5 +1,6 @@
 #include "talonsfs/superblock_utils.h"
 #include "filesystem.h"
+#include "file_descriptor.h"
 #include "block_device.h"
 #include "block_cache.h"
 
@@ -1075,6 +1076,17 @@ bool filesystem_init()
 
     mounted = true;
 
+    if (!file_descriptors_init())
+    {
+        mounted = false;
+
+        setFilesystemError(
+            FilesystemError::MetadataError
+        );
+
+        return false;
+    }
+
     return true;
 }
 
@@ -1403,9 +1415,6 @@ bool filesystem_format()
      * this the cache's round-robin eviction is free to push the
      * superblock (written below) to the platter BEFORE the metadata,
      * because eviction order follows entry index, not write order.
-     * A power loss in that window leaves a valid-looking superblock
-     * describing metadata that was never written -- the exact failure
-     * the "superblock last" rule exists to prevent.
      *
      * Draining the cache here restores the guarantee at the physical
      * device without disabling caching anywhere else.
@@ -1721,20 +1730,20 @@ bool filesystem_create_directory(
         len
     );
 
-if (!appendDirectoryEntry(
-        currentDirectoryNode,
-        entry))
-{
-    nodeManager->remove(
-        static_cast<uint64_t>(newNode)
-    );
+    if (!appendDirectoryEntry(
+            currentDirectoryNode,
+            entry))
+    {
+        nodeManager->remove(
+            static_cast<uint64_t>(newNode)
+        );
 
-    setFilesystemError(
-        FilesystemError::NoSpace
-    );
+        setFilesystemError(
+            FilesystemError::NoSpace
+        );
 
-    return false;
-}
+        return false;
+    }
 
     if (!flushMetadata())
     {
@@ -1868,6 +1877,297 @@ bool filesystem_create_file(
     return true;
 }
 
+int filesystem_open(
+    const char* name,
+    uint32_t flags)
+{
+    lastFilesystemError =
+        FilesystemError::None;
+
+    if (!mounted)
+    {
+        setFilesystemError(
+            FilesystemError::NotMounted
+        );
+
+        return -1;
+    }
+
+    if (name == nullptr ||
+        name[0] == '\0')
+    {
+        setFilesystemError(
+            FilesystemError::InvalidArgument
+        );
+
+        return -1;
+    }
+
+    if ((flags &
+         (FILESYSTEM_OPEN_READ |
+          FILESYSTEM_OPEN_WRITE)) == 0)
+    {
+        setFilesystemError(
+            FilesystemError::InvalidArgument
+        );
+
+        return -1;
+    }
+
+    if (flags &
+        ~(FILESYSTEM_OPEN_READ |
+          FILESYSTEM_OPEN_WRITE))
+    {
+        setFilesystemError(
+            FilesystemError::InvalidArgument
+        );
+
+        return -1;
+    }
+
+    TalonsFS::DirectoryEntry entry{};
+
+    if (!findDirectoryEntry(
+            currentDirectoryNode,
+            name,
+            entry))
+    {
+        setFilesystemError(
+            FilesystemError::NotFound
+        );
+
+        return -1;
+    }
+
+    if (entry.type !=
+        static_cast<uint8_t>(
+            TalonsFS::NodeType::File))
+    {
+        setFilesystemError(
+            FilesystemError::NotAFile
+        );
+
+        return -1;
+    }
+
+    const int fd =
+        file_descriptor_allocate(
+            entry.node,
+            flags
+        );
+
+    if (fd < 0)
+    {
+        setFilesystemError(
+            FilesystemError::NoSpace
+        );
+
+        return -1;
+    }
+
+    return fd;
+}
+
+bool filesystem_close(int fd)
+{
+    lastFilesystemError =
+        FilesystemError::None;
+
+    if (!mounted)
+    {
+        setFilesystemError(
+            FilesystemError::NotMounted
+        );
+
+        return false;
+    }
+
+    if (!file_descriptor_close(fd))
+    {
+        setFilesystemError(
+            FilesystemError::InvalidArgument
+        );
+
+        return false;
+    }
+
+    return true;
+}
+
+int filesystem_read(
+    int fd,
+    uint8_t* out,
+    uint32_t outCapacity)
+{
+    lastFilesystemError =
+        FilesystemError::None;
+
+    if (!mounted)
+    {
+        setFilesystemError(
+            FilesystemError::NotMounted
+        );
+
+        return -1;
+    }
+
+    if (out == nullptr ||
+        outCapacity == 0)
+    {
+        setFilesystemError(
+            FilesystemError::InvalidArgument
+        );
+
+        return -1;
+    }
+
+    FileDescriptor* descriptor =
+        file_descriptor_get(fd);
+
+    if (descriptor == nullptr)
+    {
+        setFilesystemError(
+            FilesystemError::InvalidArgument
+        );
+
+        return -1;
+    }
+
+    if ((descriptor->flags &
+         FILESYSTEM_OPEN_READ) == 0)
+    {
+        setFilesystemError(
+            FilesystemError::InvalidArgument
+        );
+
+        return -1;
+    }
+
+    const TalonsFS::Node node =
+        nodeTable->read(
+            descriptor->node
+        );
+
+    if (node.type !=
+        TalonsFS::NodeType::File)
+    {
+        setFilesystemError(
+            FilesystemError::NotAFile
+        );
+
+        return -1;
+    }
+
+    if (descriptor->offset >= node.size)
+    {
+        return 0;
+    }
+
+    if (node.dataBlocks == 0)
+    {
+        setFilesystemError(
+            FilesystemError::CorruptFilesystem
+        );
+
+        return -1;
+    }
+
+    const uint64_t remaining =
+        node.size - descriptor->offset;
+
+    uint32_t bytesToRead =
+        outCapacity;
+
+    if (remaining <
+        static_cast<uint64_t>(
+            bytesToRead))
+    {
+        bytesToRead =
+            static_cast<uint32_t>(
+                remaining
+            );
+    }
+
+    uint8_t* destination = out;
+
+    uint64_t currentOffset =
+        descriptor->offset;
+
+    uint32_t remainingToRead =
+        bytesToRead;
+
+    while (remainingToRead > 0)
+    {
+        const uint64_t blockIndex =
+            currentOffset / BLOCK_SIZE;
+
+        const uint64_t offsetInBlock =
+            currentOffset % BLOCK_SIZE;
+
+        if (blockIndex >= node.dataBlocks)
+        {
+            setFilesystemError(
+                FilesystemError::CorruptFilesystem
+            );
+
+            return -1;
+        }
+
+        const uint64_t blockNumber =
+            node.dataStart + blockIndex;
+
+        uint8_t blockBuf[BLOCK_SIZE];
+
+        if (!dataBlockManager->read(
+                blockNumber,
+                blockBuf))
+        {
+            setFilesystemError(
+                FilesystemError::DeviceError
+            );
+
+            return -1;
+        }
+
+        const uint64_t available =
+            BLOCK_SIZE - offsetInBlock;
+
+        uint32_t bytesToCopy =
+            remainingToRead;
+
+        if (available <
+            static_cast<uint64_t>(
+                bytesToCopy))
+        {
+            bytesToCopy =
+                static_cast<uint32_t>(
+                    available
+                );
+        }
+
+        __builtin_memcpy(
+            destination,
+            blockBuf + offsetInBlock,
+            bytesToCopy
+        );
+
+        destination += bytesToCopy;
+
+        currentOffset +=
+            bytesToCopy;
+
+        remainingToRead -=
+            bytesToCopy;
+    }
+
+    descriptor->offset =
+        currentOffset;
+
+    return static_cast<int>(
+        bytesToRead
+    );
+}
+
 bool filesystem_read_file(
     const char* name,
     uint8_t* out,
@@ -1900,17 +2200,17 @@ bool filesystem_read_file(
 
     TalonsFS::DirectoryEntry entry{};
 
-if (!findDirectoryEntry(
-        currentDirectoryNode,
-        name,
-        entry))
-{
-    setFilesystemError(
-        FilesystemError::NotFound
-    );
+    if (!findDirectoryEntry(
+            currentDirectoryNode,
+            name,
+            entry))
+    {
+        setFilesystemError(
+            FilesystemError::NotFound
+        );
 
-    return false;
-}
+        return false;
+    }
 
     const TalonsFS::Node node =
         nodeTable->read(entry.node);
@@ -1998,6 +2298,327 @@ if (!findDirectoryEntry(
     }
 
     *outSize = size;
+
+    return true;
+}
+
+bool filesystem_write(
+    int fd,
+    const uint8_t* data,
+    uint32_t size)
+{
+    lastFilesystemError =
+        FilesystemError::None;
+
+    if (!mounted)
+    {
+        setFilesystemError(
+            FilesystemError::NotMounted
+        );
+
+        return false;
+    }
+
+    if (data == nullptr ||
+        size == 0)
+    {
+        setFilesystemError(
+            FilesystemError::InvalidArgument
+        );
+
+        return false;
+    }
+
+    FileDescriptor* descriptor =
+        file_descriptor_get(fd);
+
+    if (descriptor == nullptr)
+    {
+        setFilesystemError(
+            FilesystemError::InvalidArgument
+        );
+
+        return false;
+    }
+
+    if ((descriptor->flags &
+         FILESYSTEM_OPEN_WRITE) == 0)
+    {
+        setFilesystemError(
+            FilesystemError::InvalidArgument
+        );
+
+        return false;
+    }
+
+    TalonsFS::Node node =
+        nodeTable->read(
+            descriptor->node
+        );
+
+    if (node.type !=
+        TalonsFS::NodeType::File)
+    {
+        setFilesystemError(
+            FilesystemError::NotAFile
+        );
+
+        return false;
+    }
+
+    const uint64_t writeStart =
+        descriptor->offset;
+
+    const uint64_t writeEnd =
+        writeStart + size;
+
+    if (writeEnd < writeStart)
+    {
+        setFilesystemError(
+            FilesystemError::InvalidArgument
+        );
+
+        return false;
+    }
+
+    const uint64_t requiredBlocks =
+        (writeEnd + BLOCK_SIZE - 1) /
+        BLOCK_SIZE;
+
+    while (node.dataBlocks < requiredBlocks)
+    {
+        if (!nodeDataManager->allocateBlock(
+                descriptor->node))
+        {
+            setFilesystemError(
+                FilesystemError::NoSpace
+            );
+
+            return false;
+        }
+
+        node =
+            nodeTable->read(
+                descriptor->node
+            );
+    }
+
+    uint64_t currentOffset =
+        writeStart;
+
+    const uint8_t* source =
+        data;
+
+    uint32_t remaining =
+        size;
+
+    while (remaining > 0)
+    {
+        const uint64_t blockIndex =
+            currentOffset / BLOCK_SIZE;
+
+        const uint64_t offsetInBlock =
+            currentOffset % BLOCK_SIZE;
+
+        if (blockIndex >= node.dataBlocks)
+        {
+            setFilesystemError(
+                FilesystemError::CorruptFilesystem
+            );
+
+            return false;
+        }
+
+        const uint64_t blockNumber =
+            node.dataStart + blockIndex;
+
+        uint8_t blockBuf[BLOCK_SIZE] = {};
+
+        const uint64_t bytesToCopy =
+            (BLOCK_SIZE - offsetInBlock <
+             static_cast<uint64_t>(remaining))
+                ? BLOCK_SIZE - offsetInBlock
+                : remaining;
+
+        if (offsetInBlock != 0 ||
+            bytesToCopy < BLOCK_SIZE)
+        {
+            if (!dataBlockManager->read(
+                    blockNumber,
+                    blockBuf))
+            {
+                setFilesystemError(
+                    FilesystemError::DeviceError
+                );
+
+                return false;
+            }
+        }
+
+        __builtin_memcpy(
+            blockBuf + offsetInBlock,
+            source,
+            bytesToCopy
+        );
+
+        if (!dataBlockManager->write(
+                blockNumber,
+                blockBuf))
+        {
+            setFilesystemError(
+                FilesystemError::DeviceError
+            );
+
+            return false;
+        }
+
+        source += bytesToCopy;
+
+        currentOffset +=
+            bytesToCopy;
+
+        remaining -=
+            static_cast<uint32_t>(
+                bytesToCopy
+            );
+    }
+
+    if (writeEnd > node.size)
+    {
+        node.size = writeEnd;
+
+        nodeTable->write(
+            descriptor->node,
+            node
+        );
+    }
+
+    descriptor->offset =
+        writeEnd;
+
+    if (!flushMetadata())
+    {
+        setFilesystemError(
+            FilesystemError::MetadataError
+        );
+
+        return false;
+    }
+
+    return true;
+}
+
+bool filesystem_seek(
+    int fd,
+    uint64_t offset)
+{
+    lastFilesystemError =
+        FilesystemError::None;
+
+    if (!mounted)
+    {
+        setFilesystemError(
+            FilesystemError::NotMounted
+        );
+
+        return false;
+    }
+
+    FileDescriptor* descriptor =
+        file_descriptor_get(fd);
+
+    if (descriptor == nullptr)
+    {
+        setFilesystemError(
+            FilesystemError::InvalidArgument
+        );
+
+        return false;
+    }
+
+    const TalonsFS::Node node =
+        nodeTable->read(
+            descriptor->node
+        );
+
+    if (node.type !=
+        TalonsFS::NodeType::File)
+    {
+        setFilesystemError(
+            FilesystemError::NotAFile
+        );
+
+        return false;
+    }
+
+    if (offset > node.size)
+    {
+        setFilesystemError(
+            FilesystemError::InvalidArgument
+        );
+
+        return false;
+    }
+
+    descriptor->offset =
+        offset;
+
+    return true;
+}
+
+bool filesystem_get_file_size(
+    int fd,
+    uint64_t* size)
+{
+    lastFilesystemError =
+        FilesystemError::None;
+
+    if (!mounted)
+    {
+        setFilesystemError(
+            FilesystemError::NotMounted
+        );
+
+        return false;
+    }
+
+    if (size == nullptr)
+    {
+        setFilesystemError(
+            FilesystemError::InvalidArgument
+        );
+
+        return false;
+    }
+
+    FileDescriptor* descriptor =
+        file_descriptor_get(fd);
+
+    if (descriptor == nullptr)
+    {
+        setFilesystemError(
+            FilesystemError::InvalidArgument
+        );
+
+        return false;
+    }
+
+    const TalonsFS::Node node =
+        nodeTable->read(
+            descriptor->node
+        );
+
+    if (node.type !=
+        TalonsFS::NodeType::File)
+    {
+        setFilesystemError(
+            FilesystemError::NotAFile
+        );
+
+        return false;
+    }
+
+    *size = node.size;
 
     return true;
 }

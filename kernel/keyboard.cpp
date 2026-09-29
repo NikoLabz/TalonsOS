@@ -103,37 +103,46 @@ char keyboard_poll_char()
     );
 
    
-   // ============================================================
-   // EXTENDED SCANCODE PREFIX
-   // ============================================================
+    // ============================================================
+    // EXTENDED SCANCODE PREFIX
+    // ============================================================
 
-   if (scancode == 0xE0)
-   {
+    if (scancode == 0xE0)
+    {
         extended_scancode = true;
-          return 0;
-   }
+        return 0;
+    }
 
-   // ============================================================
-   // EXTENDED KEY
-   // ============================================================
+    // ============================================================
+    // EXTENDED KEY
+    // ============================================================
 
     if (extended_scancode)
-    { 
-    extended_scancode = false;
-
-    if (scancode == 0x48)
     {
-        return KEY_ARROW_UP;
+        extended_scancode = false;
+
+        if (scancode == 0x48)
+        {
+            return KEY_ARROW_UP;
+        }
+
+        if (scancode == 0x50)
+        {
+            return KEY_ARROW_DOWN;
+        }
+
+        if (scancode == 0x4B)
+        {
+            return KEY_ARROW_LEFT;
+        }
+
+        if (scancode == 0x4D)
+        {
+            return KEY_ARROW_RIGHT;
+        }
+
+        return 0;
     }
-
-    if (scancode == 0x50)
-    {
-        return KEY_ARROW_DOWN;
-    }
-
-    return 0;
-}
-
    
     // ============================================================
     // LEFT SHIFT PRESSED

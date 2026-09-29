@@ -47,7 +47,7 @@ TALONSFS_SRCS := node_table bitmap block_allocator node_allocator \
                   node_manager node_data_manager data_block_manager layout \
                   superblock_checksum
 
-KERNEL_SRCS := kernel block_device block_cache filesystem keyboard memory \
+KERNEL_SRCS := kernel block_device block_cache filesystem file_descriptor keyboard memory \
                 new_delete runtime_support shell terminal vga kernel_time
 
 KERNEL_OBJS := $(addprefix $(BUILD)/,$(addsuffix .o,$(KERNEL_SRCS)))
@@ -85,6 +85,7 @@ TOOL_SRCS := tools/mkTalonsFS.cpp \
 all: $(DISK_IMG)
 
 TEST_NODE_MANAGER := $(BUILD)/test_node_manager
+TEST_FILE_DESCRIPTOR := $(BUILD)/test_file_descriptor
 TEST_FILESYSTEM := $(BUILD)/test_filesystem
 TEST_BLOCK_CACHE := $(BUILD)/test_block_cache
 TEST_BLOCK_CACHE_FULL := $(BUILD)/test_block_cache_full
@@ -109,7 +110,9 @@ TALONSFS_HOST_SRCS := \
 	filesystem/talonsfs/src/data_block_manager.cpp \
 	filesystem/talonsfs/src/directory.cpp \
 	filesystem/talonsfs/src/file_block_device.cpp \
+	filesystem/talonsfs/src/talons_file_checksum.cpp \
 	filesystem/talonsfs/src/file_data_manager.cpp \
+	filesystem/talonsfs/src/talons_file_validator.cpp \
 	filesystem/talonsfs/src/filesystem.cpp \
 	filesystem/talonsfs/src/formatter.cpp \
 	filesystem/talonsfs/src/integrity.cpp \
@@ -124,10 +127,12 @@ TALONSFS_HOST_SRCS := \
 	filesystem/talonsfs/src/time.cpp
 
 TEST_TALONSFS_UNIT_NAMES := bitmap block_allocator block_allocator_protection \
-	block_device data_block_manager directory directory_entry \
-	directory_list file_block_device file_data_manager formatter \
-	layout node node_allocator node_bitmap node_data_manager \
-	node_table persistence root_node superblock superblock_magic
+    block_device data_block_manager directory directory_entry \
+    directory_list file_block_device file_data_manager formatter \
+    layout node node_allocator node_bitmap node_data_manager \
+    node_table persistence root_node superblock superblock_magic \
+    talons_file_checksum talons_file_validator talons_file_checksum \
+
 
 TEST_TALONSFS_UNIT_BINS := $(addprefix $(BUILD)/test_,$(TEST_TALONSFS_UNIT_NAMES))
 
@@ -136,8 +141,9 @@ $(BUILD)/test_%: filesystem/talonsfs/src/test_%.cpp $(TALONSFS_HOST_SRCS) | $(BU
 
 test: $(TEST_INTEGRITY) $(TEST_PERMISSIONS) $(TEST_FILESYSTEM) \
       $(TEST_BLOCK_CACHE) $(TEST_BLOCK_CACHE_FULL) $(TEST_RTC) \
-      $(TEST_NAVIGATION) $(TEST_NODE_MANAGER) $(TEST_TALONSFS_UNIT_BINS)
+      $(TEST_NAVIGATION) $(TEST_NODE_MANAGER) $(TEST_FILE_DESCRIPTOR) $(TEST_TALONSFS_UNIT_BINS)
 	./$(TEST_NODE_MANAGER)
+	./$(TEST_FILE_DESCRIPTOR)
 	./$(TEST_INTEGRITY)
 	./$(TEST_PERMISSIONS)
 	./$(TEST_FILESYSTEM)
@@ -194,6 +200,14 @@ $(TEST_PERMISSIONS): filesystem/talonsfs/src/test_permissions.cpp \
                      filesystem/talonsfs/src/node_allocator.cpp | $(BUILD)
 	$(HOSTCXX) $(HOSTCXXFLAGS) $(HOSTINC) \
 		$^ -o $@
+
+$(TEST_FILE_DESCRIPTOR): kernel/file_descriptor_test.cpp \
+                        kernel/file_descriptor.cpp \
+                        kernel/file_descriptor.h | $(BUILD)
+	$(HOSTCXX) $(HOSTCXXFLAGS) $(HOSTINC) \
+		kernel/file_descriptor_test.cpp \
+		kernel/file_descriptor.cpp \
+		-o $@
 
 $(TEST_NODE_MANAGER): filesystem/talonsfs/src/test_node_manager.cpp \
                       filesystem/talonsfs/src/node_manager.cpp \
@@ -280,6 +294,7 @@ $(TEST_NAVIGATION): tests/test_navigation_regression.cpp \
 		tests/host_stubs/vga_stub.cpp \
 		tests/host_stubs/keyboard_stub.cpp \
 		kernel/filesystem.cpp \
+		kernel/file_descriptor.cpp \
 		kernel/terminal.cpp \
 		kernel/shell.cpp \
 		kernel/block_cache.cpp \

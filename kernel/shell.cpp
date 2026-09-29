@@ -275,7 +275,397 @@ extern "C" void shell_handle_line(const char* line)
             else { print_bytes(fileBuffer, size); print_string("\n"); }
         }
     } 
-   
+  
+else if (command_matches(line, "SesameSeeds", &arg))
+{
+    if (arg == nullptr)
+    {
+        print_string(
+            "SesameSeeds : usage: SesameSeeds <file> <read|write|rw>\n"
+        );
+    }
+    else
+    {
+        char name[kfs::MAX_NAME_LEN];
+        unsigned int i = 0;
+
+        while (arg[i] != ' ' &&
+               arg[i] != '\0' &&
+               i < kfs::MAX_NAME_LEN - 1)
+        {
+            name[i] = arg[i];
+            ++i;
+        }
+
+        name[i] = '\0';
+
+        while (arg[i] == ' ')
+        {
+            ++i;
+        }
+
+        const char* mode = &arg[i];
+
+        uint32_t flags = 0;
+
+        if (mode[0] == 'r' &&
+            mode[1] == 'e' &&
+            mode[2] == 'a' &&
+            mode[3] == 'd' &&
+            mode[4] == '\0')
+        {
+            flags = FILESYSTEM_OPEN_READ;
+        }
+        else if (mode[0] == 'w' &&
+                 mode[1] == 'r' &&
+                 mode[2] == 'i' &&
+                 mode[3] == 't' &&
+                 mode[4] == 'e' &&
+                 mode[5] == '\0')
+        {
+            flags = FILESYSTEM_OPEN_WRITE;
+        }
+        else if (mode[0] == 'r' &&
+                 mode[1] == 'w' &&
+                 mode[2] == '\0')
+        {
+            flags =
+                FILESYSTEM_OPEN_READ |
+                FILESYSTEM_OPEN_WRITE;
+        }
+        else
+        {
+            print_string(
+                "SesameSeeds : mode must be read, write, or rw\n"
+            );
+            return;
+        }
+
+        if (name[0] == '\0')
+        {
+            print_string(
+                "SesameSeeds : missing file name\n"
+            );
+        }
+        else if (!filesystem_is_mounted())
+        {
+            print_string(
+                "TalonsFS mount failed\n"
+            );
+        }
+        else
+        {
+            const int fd =
+                filesystem_open(
+                    name,
+                    flags
+                );
+
+            if (fd < 0)
+            {
+                print_fs_error("SesameSeeds");
+            }
+            else
+            {
+                print_string("Opened ");
+                print_string(name);
+                print_string(" with fd ");
+                print_number(
+                    static_cast<unsigned int>(fd)
+                );
+                print_string("\n");
+            }
+        }
+    }
+}
+
+    else if (command_matches(line, "CloseSesame", &arg))
+    {
+        if (arg == nullptr)
+        {
+            print_string(
+                "CloseSesame : missing file descriptor\n"
+            );
+        }
+        else
+        {
+            int fd = 0;
+            unsigned int i = 0;
+
+            while (arg[i] >= '0' &&
+                   arg[i] <= '9')
+            {
+                fd = (fd * 10) +
+                     (arg[i] - '0');
+                ++i;
+            }
+
+            if (filesystem_close(fd))
+            {
+                print_string("Closed fd ");
+                print_number(
+                    static_cast<unsigned int>(fd)
+                );
+                print_string("\n");
+            }
+            else
+            {
+                print_fs_error("CloseSesame");
+            }
+        }
+    }
+
+    else if (command_matches(line, "ReadSesame", &arg))
+{
+    if (arg == nullptr)
+    {
+        print_string(
+            "ReadSesame : missing file descriptor\n"
+        );
+    }
+    else
+    {
+        int fd = 0;
+        unsigned int i = 0;
+
+        while (arg[i] >= '0' &&
+               arg[i] <= '9')
+        {
+            fd = (fd * 10) +
+                 (arg[i] - '0');
+
+            ++i;
+        }
+
+        uint8_t buffer[256];
+
+        const int bytesRead =
+            filesystem_read(
+                fd,
+                buffer,
+                sizeof(buffer)
+            );
+
+        if (bytesRead < 0)
+        {
+            print_fs_error("ReadSesame");
+        }
+        else
+        {
+            for (int j = 0;
+                 j < bytesRead;
+                 ++j)
+            {
+                char character[2];
+
+                character[0] =
+                    static_cast<char>(
+                        buffer[j]
+                    );
+
+                character[1] = '\0';
+
+                print_string(character);
+            }
+
+            print_string("\n");
+        }
+    }
+}
+
+else if (command_matches(line, "SeekSesame", &arg))
+{
+    if (arg == nullptr)
+    {
+        print_string(
+            "SeekSesame : usage: SeekSesame <fd> <offset>\n"
+        );
+    }
+    else
+    {
+        int fd = 0;
+        unsigned int i = 0;
+
+        while (arg[i] >= '0' &&
+               arg[i] <= '9')
+        {
+            fd = (fd * 10) +
+                 (arg[i] - '0');
+
+            ++i;
+        }
+
+        while (arg[i] == ' ')
+        {
+            ++i;
+        }
+
+        if (arg[i] == '\0')
+        {
+            print_string(
+                "SeekSesame : missing offset\n"
+            );
+        }
+        else
+        {
+            uint64_t offset = 0;
+
+            while (arg[i] >= '0' &&
+                   arg[i] <= '9')
+            {
+                offset =
+                    (offset * 10) +
+                    (arg[i] - '0');
+
+                ++i;
+            }
+
+            if (filesystem_seek(
+                    fd,
+                    offset))
+            {
+                print_string(
+                    "Seeked fd "
+                );
+
+                print_number(
+                    static_cast<unsigned int>(fd)
+                );
+
+                print_string(
+                    " to offset "
+                );
+
+                print_number(
+                    static_cast<unsigned int>(offset)
+                );
+
+                print_string("\n");
+            }
+            else
+            {
+                print_fs_error("SeekSesame");
+            }
+        }
+    }
+}
+
+else if (command_matches(line, "SizeSesame", &arg))
+{
+    if (arg == nullptr)
+    {
+        print_string(
+            "SizeSesame : missing file descriptor\n"
+        );
+    }
+    else
+    {
+        int fd = 0;
+        unsigned int i = 0;
+
+        while (arg[i] >= '0' &&
+               arg[i] <= '9')
+        {
+            fd = (fd * 10) +
+                 (arg[i] - '0');
+
+            ++i;
+        }
+
+        uint64_t size = 0;
+
+        if (filesystem_get_file_size(
+                fd,
+                &size))
+        {
+            print_string(
+                "File size: "
+            );
+
+            print_number(
+                static_cast<unsigned int>(size)
+            );
+
+            print_string(
+                " bytes\n"
+            );
+        }
+        else
+        {
+            print_fs_error("SizeSesame");
+        }
+    }
+}
+
+else if (command_matches(line, "WriteSesame", &arg))
+{
+    if (arg == nullptr)
+    {
+        print_string(
+            "WriteSesame : missing arguments\n"
+        );
+    }
+    else
+    {
+        int fd = 0;
+        unsigned int i = 0;
+
+        while (arg[i] >= '0' &&
+               arg[i] <= '9')
+        {
+            fd = (fd * 10) +
+                 (arg[i] - '0');
+
+            ++i;
+        }
+
+        while (arg[i] == ' ')
+        {
+            ++i;
+        }
+
+        const char* text = &arg[i];
+
+        if (text[0] == '\0')
+        {
+            print_string(
+                "WriteSesame : missing data\n"
+            );
+        }
+        else
+        {
+            uint32_t textLength = 0;
+
+            while (text[textLength] != '\0')
+            {
+                ++textLength;
+            }
+
+            if (filesystem_write(
+                    fd,
+                    reinterpret_cast<const uint8_t*>(text),
+                    textLength))
+            {
+                print_string(
+                    "Wrote "
+                );
+                print_number(textLength);
+                print_string(
+                    " bytes to fd "
+                );
+                print_number(
+                    static_cast<unsigned int>(fd)
+                );
+                print_string("\n");
+            }
+            else
+            {
+                print_fs_error("WriteSesame");
+            }
+        }
+    }
+}
+
     else if (command_matches(line, "huh?", &arg))
 {
     char name[kfs::MAX_NAME_LEN];

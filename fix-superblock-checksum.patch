@@ -1,0 +1,29 @@
+diff --git a/filesystem/talonsfs/src/filesystem.cpp b/filesystem/talonsfs/src/filesystem.cpp
+index 2000698..fea9752 100644
+--- a/filesystem/talonsfs/src/filesystem.cpp
++++ b/filesystem/talonsfs/src/filesystem.cpp
+@@ -9,6 +9,7 @@
+ 
+ #include "../include/talonsfs/filesystem.h"
+ #include "../include/talonsfs/formatter.h"
++#include "../include/talonsfs/superblock_utils.h"
+ 
+ namespace TalonsFS {
+ 
+@@ -818,7 +819,16 @@ bool FileSystem::saveMetadata()
+ 
+     /*
+      * Superblock
++     *
++     * updateFreeCounts() (called by sync() just before this) rewrites
++     * freeBlocks/freeNodes, both of which are covered by the
++     * superblock checksum. The checksum MUST therefore be recomputed
++     * here, at the single point where the superblock is serialized,
++     * or the on-disk superblock fails the kernel's mount-time
++     * verification (kernel/filesystem.cpp filesystem_init()).
+      */
++    superblock_.checksum =
++        calculateSuperblockChecksum(superblock_);
+ 
+     std::vector<uint8_t> superblockBuffer(
+         blockSize,

@@ -64,6 +64,40 @@ bool filesystem_create_file(
     const char* name
 );
 
+constexpr uint32_t FILESYSTEM_OPEN_READ = 1u << 0;
+constexpr uint32_t FILESYSTEM_OPEN_WRITE = 1u << 1;
+
+int filesystem_open(
+    const char* name,
+    uint32_t flags
+);
+
+bool filesystem_close(
+    int fd
+);
+
+int filesystem_read(
+    int fd,
+    uint8_t* out,
+    uint32_t outCapacity
+);
+
+bool filesystem_seek(
+    int fd,
+    uint64_t offset
+);
+
+bool filesystem_get_file_size(
+    int fd,
+    uint64_t* size
+);
+
+bool filesystem_write(
+    int fd,
+    const uint8_t* data,
+    uint32_t size
+);
+
 bool filesystem_read_file(
     const char* name,
     uint8_t* out,
