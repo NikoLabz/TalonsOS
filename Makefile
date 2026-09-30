@@ -107,6 +107,7 @@ TEST_DISK_IMG := $(BUILD)/test_disk.img
 TALONSFS_HOST_SRCS := \
 	filesystem/talonsfs/src/bitmap.cpp \
 	filesystem/talonsfs/src/block_allocator.cpp \
+	filesystem/talonsfs/src/talons_file_serialization.cpp \
 	filesystem/talonsfs/src/data_block_manager.cpp \
 	filesystem/talonsfs/src/directory.cpp \
 	filesystem/talonsfs/src/file_block_device.cpp \
@@ -132,7 +133,7 @@ TEST_TALONSFS_UNIT_NAMES := bitmap block_allocator block_allocator_protection \
     layout node node_allocator node_bitmap node_data_manager \
     node_table persistence root_node superblock superblock_magic \
     talons_file_checksum talons_file_validator talons_file_checksum \
-
+    talons_file_serialization
 
 TEST_TALONSFS_UNIT_BINS := $(addprefix $(BUILD)/test_,$(TEST_TALONSFS_UNIT_NAMES))
 
