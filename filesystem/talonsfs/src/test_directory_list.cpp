@@ -2,6 +2,7 @@
 #include <cstring>
 #include <vector>
 
+#include "../include/talons_standard_paths.h"
 #include "../include/talonsfs/memory_block_device.h"
 #include "../include/talonsfs/formatter.h"
 #include "../include/talonsfs/directory.h"
@@ -95,23 +96,23 @@ nodeTable.write(
     );
 
 
-    const char* names[] =
-    {
-        "Laboratory",
-        "DoTheThings",
-        "PleaseConfigureThese",
-        "ThingsKeepChanging",
-        "ProbablyTemporary",
-        "HumanThings",
-        "ThingsWithWires",
-        "TheSystemIsBusy",
-        "ExtraThings",
-        "TheServerIsWorking",
-        "PutThingsHere",
-        "UnpluggedThings",
-        "WeFoundThese"
-    };
 
+	const char* names[] =
+{
+    TalonsPaths::LABORATORY,
+    TalonsPaths::DO_THE_THINGS,
+    TalonsPaths::PLEASE_CONFIGURE_THESE,
+    TalonsPaths::THINGS_KEEP_CHANGING,
+    TalonsPaths::PROBABLY_TEMPORARY,
+    TalonsPaths::HUMAN_THINGS,
+    TalonsPaths::THINGS_WITH_WIRES,
+    TalonsPaths::THE_SYSTEM_IS_BUSY,
+    TalonsPaths::EXTRA_THINGS,
+    TalonsPaths::THE_SERVER_IS_WORKING,
+    TalonsPaths::PUT_THINGS_HERE,
+    TalonsPaths::UNPLUGGED_THINGS,
+    TalonsPaths::WE_FOUND_THESE
+};
 
     for (const char* name : names)
     {

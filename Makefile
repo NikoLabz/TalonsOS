@@ -108,6 +108,9 @@ TALONSFS_HOST_SRCS := \
 	filesystem/talonsfs/src/bitmap.cpp \
 	filesystem/talonsfs/src/block_allocator.cpp \
 	filesystem/talonsfs/src/talons_file_serialization.cpp \
+	filesystem/talonsfs/src/talons_file_parsing.cpp \
+	filesystem/talonsfs/src/talons_file_integrity.cpp \
+	filesystem/talonsfs/src/talons_file_creation.cpp \
 	filesystem/talonsfs/src/data_block_manager.cpp \
 	filesystem/talonsfs/src/directory.cpp \
 	filesystem/talonsfs/src/file_block_device.cpp \
@@ -125,7 +128,9 @@ TALONSFS_HOST_SRCS := \
 	filesystem/talonsfs/src/node_table.cpp \
 	filesystem/talonsfs/src/permissions.cpp \
 	filesystem/talonsfs/src/superblock_utils.cpp \
-	filesystem/talonsfs/src/time.cpp
+	filesystem/talonsfs/src/time.cpp \
+	filesystem/talonsfs/src/talons_file_loading.cpp \
+	filesystem/talonsfs/src/talons_file_type.cpp
 
 TEST_TALONSFS_UNIT_NAMES := bitmap block_allocator block_allocator_protection \
     block_device data_block_manager directory directory_entry \
@@ -133,7 +138,8 @@ TEST_TALONSFS_UNIT_NAMES := bitmap block_allocator block_allocator_protection \
     layout node node_allocator node_bitmap node_data_manager \
     node_table persistence root_node superblock superblock_magic \
     talons_file_checksum talons_file_validator talons_file_checksum \
-    talons_file_serialization
+    talons_file_serialization talons_file_parsing talons_file_integrity \
+    talons_file_creation talons_file_loading talons_file_type 
 
 TEST_TALONSFS_UNIT_BINS := $(addprefix $(BUILD)/test_,$(TEST_TALONSFS_UNIT_NAMES))
 
