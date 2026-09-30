@@ -3,6 +3,7 @@
 #include "file_descriptor.h"
 #include "block_device.h"
 #include "block_cache.h"
+#include "pipe_manager.h"
 
 #include <new>
 #include <stdint.h>
@@ -715,6 +716,47 @@ namespace
 
         return false;
     }
+
+    bool hasTalonsFileExtension(
+    const char* name)
+{
+    if (name == nullptr)
+    {
+        return false;
+    }
+
+    uint32_t length = 0;
+
+    while (name[length] != '\0')
+    {
+        ++length;
+    }
+
+    constexpr char extension[] = ".tal";
+    constexpr uint32_t extensionLength = 4;
+
+    if (length < extensionLength)
+    {
+        return false;
+    }
+
+    const uint32_t extensionStart =
+        length - extensionLength;
+
+    for (uint32_t i = 0;
+         i < extensionLength;
+         ++i)
+    {
+        if (name[extensionStart + i] !=
+            extension[i])
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
+
 }
 
 bool filesystem_init()
@@ -1076,7 +1118,19 @@ bool filesystem_init()
 
     mounted = true;
 
-    if (!file_descriptors_init())
+if (!pipe_manager_init())
+{
+    mounted = false;
+
+    setFilesystemError(
+        FilesystemError::MetadataError
+    );
+
+    return false;
+}
+
+if (!file_descriptors_init())
+
     {
         mounted = false;
 
@@ -1773,7 +1827,32 @@ bool filesystem_create_file(
     }
 
     if (name == nullptr ||
-        name[0] == '\0')
+    name[0] == '\0')
+{
+    setFilesystemError(
+        FilesystemError::InvalidArgument
+    );
+
+    return false;
+}
+
+if (!hasTalonsFileExtension(name))
+{
+    setFilesystemError(
+        FilesystemError::InvalidArgument
+    );
+
+    return false;
+}
+
+uint32_t len = 0;
+
+while (name[len] != '\0')
+{
+    ++len;
+
+    if (len >=
+        TalonsFS::MaxFilenameLength)
     {
         setFilesystemError(
             FilesystemError::InvalidArgument
@@ -1781,23 +1860,7 @@ bool filesystem_create_file(
 
         return false;
     }
-
-    uint32_t len = 0;
-
-    while (name[len] != '\0')
-    {
-        ++len;
-
-        if (len >=
-            TalonsFS::MaxFilenameLength)
-        {
-            setFilesystemError(
-                FilesystemError::InvalidArgument
-            );
-
-            return false;
-        }
-    }
+}
 
     TalonsFS::DirectoryEntry existing{};
 
@@ -1968,6 +2031,73 @@ int filesystem_open(
     return fd;
 }
 
+bool filesystem_create_pipe(
+    int& readFd,
+    int& writeFd
+)
+{
+    lastFilesystemError =
+        FilesystemError::None;
+
+    if (!mounted)
+    {
+        setFilesystemError(
+            FilesystemError::NotMounted
+        );
+
+        return false;
+    }
+
+    const int pipeId =
+        pipe_manager_create();
+
+    if (pipeId < 0)
+    {
+        setFilesystemError(
+            FilesystemError::NoSpace
+        );
+
+        return false;
+    }
+
+    readFd =
+        file_descriptor_allocate_pipe(
+            static_cast<uint32_t>(pipeId),
+            FILESYSTEM_OPEN_READ
+        );
+
+    if (readFd < 0)
+    {
+        pipe_manager_destroy(pipeId);
+
+        setFilesystemError(
+            FilesystemError::NoSpace
+        );
+
+        return false;
+    }
+
+    writeFd =
+        file_descriptor_allocate_pipe(
+            static_cast<uint32_t>(pipeId),
+            FILESYSTEM_OPEN_WRITE
+        );
+
+    if (writeFd < 0)
+    {
+        file_descriptor_close(readFd);
+        pipe_manager_destroy(pipeId);
+
+        setFilesystemError(
+            FilesystemError::NoSpace
+        );
+
+        return false;
+    }
+
+    return true;
+}
+
 bool filesystem_close(int fd)
 {
     lastFilesystemError =
@@ -2042,6 +2172,41 @@ int filesystem_read(
 
         return -1;
     }
+
+    if ((descriptor->flags &
+     FILESYSTEM_OPEN_READ) == 0)
+{
+    setFilesystemError(
+        FilesystemError::InvalidArgument
+    );
+
+    return -1;
+}
+
+if (descriptor->type == FileDescriptorType::Pipe)
+{
+    Pipe* pipe =
+        pipe_manager_get(
+            static_cast<int>(
+                descriptor->pipeId
+            )
+        );
+
+    if (pipe == nullptr)
+    {
+        setFilesystemError(
+            FilesystemError::InvalidArgument
+        );
+
+        return -1;
+    }
+
+    return pipe_read(
+        *pipe,
+        out,
+        outCapacity
+    ) ? static_cast<int>(outCapacity) : -1;
+}
 
     const TalonsFS::Node node =
         nodeTable->read(
@@ -2349,6 +2514,39 @@ bool filesystem_write(
         );
 
         return false;
+    }
+
+        if (descriptor->type == FileDescriptorType::Pipe)
+    {
+        Pipe* pipe =
+            pipe_manager_get(
+                static_cast<int>(
+                    descriptor->pipeId
+                )
+            );
+
+        if (pipe == nullptr)
+        {
+            setFilesystemError(
+                FilesystemError::InvalidArgument
+            );
+
+            return false;
+        }
+
+        if (!pipe_write(
+                *pipe,
+                data,
+                size))
+        {
+            setFilesystemError(
+                FilesystemError::InvalidArgument
+            );
+
+            return false;
+        }
+
+        return true;
     }
 
     TalonsFS::Node node =

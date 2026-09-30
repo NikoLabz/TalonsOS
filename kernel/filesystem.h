@@ -72,6 +72,11 @@ int filesystem_open(
     uint32_t flags
 );
 
+bool filesystem_create_pipe(
+    int& readFd,
+    int& writeFd
+);
+
 bool filesystem_close(
     int fd
 );
