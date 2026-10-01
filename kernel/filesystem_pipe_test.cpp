@@ -1,3 +1,4 @@
+#include "pipe_manager.h"
 #include "pipe.h"
 #include "filesystem.h"
 #include "file_descriptor.h"
@@ -114,11 +115,50 @@ const uint8_t message[] =
             return 19;
     }
 
+        const uint32_t pipeId =
+        readDescriptor->pipeId;
+
+
     if (!filesystem_close(readFd))
         return 15;
 
+    // Closing the read end must not destroy the pipe
+    // while the write end is still open.
+    if (pipe_manager_get(
+            static_cast<int>(pipeId)) == nullptr)
+        return 22;
+
     if (!filesystem_close(writeFd))
         return 16;
+
+    // Both endpoints are now closed, so the pipe
+    // should have been destroyed.
+        if (pipe_manager_get(
+            static_cast<int>(pipeId)) != nullptr)
+        return 23;
+
+    int secondReadFd = -1;
+    int secondWriteFd = -1;
+
+    if (!filesystem_create_pipe(
+            secondReadFd,
+            secondWriteFd))
+        return 24;
+
+    FileDescriptor* secondReadDescriptor =
+        file_descriptor_get(secondReadFd);
+
+    if (!secondReadDescriptor)
+        return 25;
+
+    if (secondReadDescriptor->pipeId != pipeId)
+        return 26;
+
+    if (!filesystem_close(secondReadFd))
+        return 27;
+
+    if (!filesystem_close(secondWriteFd))
+        return 28;
 
     return 0;
 }

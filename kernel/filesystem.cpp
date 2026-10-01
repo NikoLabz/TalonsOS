@@ -2098,6 +2098,7 @@ bool filesystem_create_pipe(
     return true;
 }
 
+
 bool filesystem_close(int fd)
 {
     lastFilesystemError =
@@ -2112,6 +2113,44 @@ bool filesystem_close(int fd)
         return false;
     }
 
+    FileDescriptor* descriptor =
+        file_descriptor_get(fd);
+
+    if (descriptor == nullptr ||
+        fd < FIRST_USER_FILE_DESCRIPTOR)
+    {
+        setFilesystemError(
+            FilesystemError::InvalidArgument
+        );
+
+        return false;
+    }
+
+    // Save pipe information before releasing the descriptor.
+    const bool isPipe =
+        descriptor->type == FileDescriptorType::Pipe;
+
+    const uint32_t pipeId = descriptor->pipeId;
+    const uint32_t flags = descriptor->flags;
+
+    Pipe* pipe = nullptr;
+
+    if (isPipe)
+    {
+        pipe = pipe_manager_get(
+            static_cast<int>(pipeId)
+        );
+
+        if (pipe == nullptr)
+        {
+            setFilesystemError(
+                FilesystemError::InvalidArgument
+            );
+
+            return false;
+        }
+    }
+
     if (!file_descriptor_close(fd))
     {
         setFilesystemError(
@@ -2119,6 +2158,28 @@ bool filesystem_close(int fd)
         );
 
         return false;
+    }
+
+    if (isPipe)
+    {
+        if (flags & FILESYSTEM_OPEN_READ)
+            pipe_close_read(*pipe);
+
+        if (flags & FILESYSTEM_OPEN_WRITE)
+            pipe_close_write(*pipe);
+
+        if (!pipe->readOpen && !pipe->writeOpen)
+        {
+            if (!pipe_manager_destroy(
+                    static_cast<int>(pipeId)))
+            {
+                setFilesystemError(
+                    FilesystemError::MetadataError
+                );
+
+                return false;
+            }
+        }
     }
 
     return true;

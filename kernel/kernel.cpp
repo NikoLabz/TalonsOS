@@ -1,3 +1,4 @@
+#include "standard_streams.h"
 #include "memory.h"
 #include "filesystem.h"
 #include "vga.h"
@@ -36,6 +37,8 @@ extern "C" void kernel_main()
         vga_putchar_at(80 + j, fsStatus[j], colour);
     }
 
+    standard_streams_init(23);
+ 
     terminal_init();
     terminal_run();
 }

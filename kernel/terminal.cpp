@@ -1,3 +1,4 @@
+#include "standard_streams.h"
 #include "terminal.h"
 #include "vga.h"
 #include "keyboard.h"
@@ -198,8 +199,9 @@ void terminal_run()
 {
     while (true)
     {
-        char character =
-            keyboard_poll_char();
+
+	char character =
+    static_cast<char>(stdin_read_char());
 
         if (character == 0)
         {

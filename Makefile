@@ -47,8 +47,8 @@ TALONSFS_SRCS := node_table bitmap block_allocator node_allocator \
                   node_manager node_data_manager data_block_manager layout \
                   superblock_checksum
 
-KERNEL_SRCS := kernel block_device block_cache filesystem file_descriptor keyboard memory \
-                new_delete runtime_support shell terminal vga kernel_time
+KERNEL_SRCS := kernel block_device block_cache filesystem file_descriptor keyboard standard_streams \
+                pipe pipe_manager memory new_delete runtime_support shell terminal vga kernel_time
 
 KERNEL_OBJS := $(addprefix $(BUILD)/,$(addsuffix .o,$(KERNEL_SRCS)))
 TALONSFS_OBJS := $(addprefix $(BUILD)/talonsfs_,$(addsuffix .o,$(TALONSFS_SRCS)))
@@ -284,6 +284,10 @@ $(TEST_NAVIGATION): tests/test_navigation_regression.cpp \
                     kernel/terminal.cpp \
                     kernel/shell.cpp \
                     kernel/block_cache.cpp \
+		    kernel/file_descriptor.cpp \
+                    kernel/pipe.cpp \
+                    kernel/pipe_manager.cpp \
+                    kernel/standard_streams.cpp \
                     filesystem/talonsfs/src/node_table.cpp \
                     filesystem/talonsfs/src/bitmap.cpp \
                     filesystem/talonsfs/src/block_allocator.cpp \
@@ -305,6 +309,9 @@ $(TEST_NAVIGATION): tests/test_navigation_regression.cpp \
 		kernel/terminal.cpp \
 		kernel/shell.cpp \
 		kernel/block_cache.cpp \
+                    kernel/pipe.cpp \
+                    kernel/pipe_manager.cpp \
+                kernel/standard_streams.cpp \
 		filesystem/talonsfs/src/node_table.cpp \
 		filesystem/talonsfs/src/bitmap.cpp \
 		filesystem/talonsfs/src/block_allocator.cpp \

@@ -127,7 +127,7 @@ int main()
         "Create child directory inside parent");
 
     check(
-        filesystem_create_file("childfile"),
+        filesystem_create_file("childfile.tal"),
         "Create child file inside parent");
 
     {
@@ -137,7 +137,7 @@ int main()
         check(
             count == 2 &&
             listingHasEntry(entries, count, "childdir", true) &&
-            listingHasEntry(entries, count, "childfile", false),
+            listingHasEntry(entries, count, "childfile.tal", false),
             "Parent directory lists its own two children correctly");
     }
 
@@ -168,7 +168,7 @@ int main()
 
         check(
             listingHasEntry(entries, count, "childdir", true) &&
-            listingHasEntry(entries, count, "childfile", false),
+            listingHasEntry(entries, count, "childfile.tal", false),
             "Parent entry names/types still present after returning "
             "from child");
     }
@@ -193,7 +193,7 @@ int main()
         "Create siblingB at root");
 
     check(
-        filesystem_create_file("siblingC"),
+        filesystem_create_file("siblingC.tal"),
         "Create siblingC (file) at root");
 
     for (int round = 0; round < 3; ++round) {
@@ -202,7 +202,7 @@ int main()
             "Repeated navigation: enter siblingA");
 
         char fname[16];
-        std::snprintf(fname, sizeof(fname), "r%dfile", round);
+        std::snprintf(fname, sizeof(fname), "r%dfile.tal", round);
         check(
             filesystem_create_file(fname),
             "Repeated navigation: create a file inside siblingA");
@@ -230,7 +230,7 @@ int main()
             listingHasEntry(entries, count, "parentdir", true) &&
             listingHasEntry(entries, count, "siblingA", true) &&
             listingHasEntry(entries, count, "siblingB", true) &&
-            listingHasEntry(entries, count, "siblingC", false);
+            listingHasEntry(entries, count, "siblingC.tal", false);
 
         check(
             entriesOk,

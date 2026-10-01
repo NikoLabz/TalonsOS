@@ -231,6 +231,42 @@ std::vector<uint8_t> data;
         }
 
         std::cout << "Persistence test: 1\n";
+	
+	        const std::string binaryPath =
+            "/TheFridgeIsProbablyFull/binary.tal";
+
+        const std::vector<uint8_t> binaryData = {
+            0x00,
+            0xFF,
+            0x13,
+            0xA7,
+            0x00,
+            0x42
+        };
+
+        if (!fs.createFile(binaryPath)) {
+            std::cout << "Binary file creation failed\n";
+            return 1;
+        }
+
+        if (!fs.writeFile(binaryPath, binaryData)) {
+            std::cout << "Binary file write failed\n";
+            return 1;
+        }
+
+        std::vector<uint8_t> binaryOutput;
+
+        if (!fs.readFile(binaryPath, binaryOutput)) {
+            std::cout << "Binary file read failed\n";
+            return 1;
+        }
+
+        if (binaryOutput != binaryData) {
+            std::cout << "Binary data corrupted\n";
+            return 1;
+        }
+
+        std::cout << "Binary file test: 1\n";
 
         if (!fs.unmount()) {
             std::cout << "Final unmount failed\n";
