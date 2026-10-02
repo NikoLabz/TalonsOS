@@ -13,6 +13,7 @@ constexpr int FIRST_USER_FILE_DESCRIPTOR = 3;
 enum class FileDescriptorType : uint8_t
 {
     File,
+    Directory,
     Pipe
 };
 
@@ -29,6 +30,11 @@ struct FileDescriptor
 bool file_descriptors_init();
 
 int file_descriptor_allocate(
+    uint64_t node,
+    uint32_t flags
+);
+
+int file_descriptor_allocate_directory(
     uint64_t node,
     uint32_t flags
 );

@@ -72,6 +72,16 @@ int filesystem_open(
     uint32_t flags
 );
 
+int filesystem_open_directory(
+    const char* name,
+    uint32_t flags
+);
+
+int filesystem_read_directory(
+    int fd,
+    kfs::ListEntry* out
+);
+
 bool filesystem_create_pipe(
     int& readFd,
     int& writeFd

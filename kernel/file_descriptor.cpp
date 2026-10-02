@@ -70,6 +70,31 @@ int file_descriptor_allocate(
     return -1;
 }
 
+int file_descriptor_allocate_directory(
+    uint64_t node,
+    uint32_t flags
+)
+{
+    for (uint32_t i = FIRST_USER_FILE_DESCRIPTOR;
+         i < MAX_FILE_DESCRIPTORS;
+         ++i)
+    {
+        if (!descriptors[i].used)
+        {
+            descriptors[i].used = true;
+            descriptors[i].type = FileDescriptorType::Directory;
+            descriptors[i].node = node;
+            descriptors[i].offset = 0;
+            descriptors[i].flags = flags;
+            descriptors[i].pipeId = 0;
+
+            return static_cast<int>(i);
+        }
+    }
+
+    return -1;
+}
+
 int file_descriptor_allocate_pipe(
     uint32_t pipeId,
     uint32_t flags

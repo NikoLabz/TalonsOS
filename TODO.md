@@ -204,20 +204,20 @@
 * [x] Implement open()
 * [x] Implement close()
 * [x] Implement read()
-* [ ] Implement write()
-* [ ] Implement seek()
-* [ ] Implement file size queries
-* [ ] Implement directory handles
+* [x] Implement write()
+* [x] Implement seek()
+* [x] Implement file size queries
+* [x] Implement directory handles
 * [x] Implement filesystem API *(kernel/filesystem.h — name-based rather than descriptor-based; the open/close/read/write/seek items above describe a different, handle-based API still to build)*
-* [ ] Implement `.tal` file recognition
-* [ ] Implement `.tal` file loading
-* [ ] Define standard file types
-* [ ] Define standard paths
-* [ ] Implement stdin
-* [ ] Implement stdout
-* [ ] Implement stderr
-* [ ] Implement pipes
-* [ ] Implement basic redirection
+* [x] Implement `.tal` file recognition
+* [x] Implement `.tal` file loading
+* [x] Define standard file types
+* [x] Define standard paths
+* [x] Implement stdin
+* [x] Implement stdout
+* [x] Implement stderr
+* [x] Implement pipes
+* [x] Implement basic redirection
 
 ---
 

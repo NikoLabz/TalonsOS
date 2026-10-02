@@ -2031,6 +2031,285 @@ int filesystem_open(
     return fd;
 }
 
+int filesystem_open_directory(
+    const char* name,
+    uint32_t flags)
+{
+    lastFilesystemError =
+        FilesystemError::None;
+
+    if (!mounted)
+    {
+        setFilesystemError(
+            FilesystemError::NotMounted
+        );
+
+        return -1;
+    }
+
+    if (name == nullptr ||
+        name[0] == '\0')
+    {
+        setFilesystemError(
+            FilesystemError::InvalidArgument
+        );
+
+        return -1;
+    }
+
+    if ((flags &
+         (FILESYSTEM_OPEN_READ |
+          FILESYSTEM_OPEN_WRITE)) == 0)
+    {
+        setFilesystemError(
+            FilesystemError::InvalidArgument
+        );
+
+        return -1;
+    }
+
+    if (flags &
+        ~(FILESYSTEM_OPEN_READ |
+          FILESYSTEM_OPEN_WRITE))
+    {
+        setFilesystemError(
+            FilesystemError::InvalidArgument
+        );
+
+        return -1;
+    }
+
+    TalonsFS::DirectoryEntry entry{};
+
+    if (!findDirectoryEntry(
+            currentDirectoryNode,
+            name,
+            entry))
+    {
+        setFilesystemError(
+            FilesystemError::NotFound
+        );
+
+        return -1;
+    }
+
+    if (entry.type !=
+        static_cast<uint8_t>(
+            TalonsFS::NodeType::Directory))
+    {
+        setFilesystemError(
+            FilesystemError::NotADirectory
+        );
+
+        return -1;
+    }
+
+    const int fd =
+        file_descriptor_allocate_directory(
+            entry.node,
+            flags
+        );
+
+    if (fd < 0)
+    {
+        setFilesystemError(
+            FilesystemError::NoSpace
+        );
+
+        return -1;
+    }
+
+    return fd;
+}
+
+int filesystem_read_directory(
+    int fd,
+    kfs::ListEntry* out)
+{
+    lastFilesystemError =
+        FilesystemError::None;
+
+    if (!mounted)
+    {
+        setFilesystemError(
+            FilesystemError::NotMounted
+        );
+
+        return -1;
+    }
+
+    if (out == nullptr)
+    {
+        setFilesystemError(
+            FilesystemError::InvalidArgument
+        );
+
+        return -1;
+    }
+
+    FileDescriptor* descriptor =
+        file_descriptor_get(fd);
+
+    if (descriptor == nullptr ||
+        fd < FIRST_USER_FILE_DESCRIPTOR)
+    {
+        setFilesystemError(
+            FilesystemError::InvalidArgument
+        );
+
+        return -1;
+    }
+
+    if (descriptor->type !=
+        FileDescriptorType::Directory)
+    {
+        setFilesystemError(
+            FilesystemError::NotADirectory
+        );
+
+        return -1;
+    }
+
+    if (!(descriptor->flags &
+          FILESYSTEM_OPEN_READ))
+    {
+        setFilesystemError(
+            FilesystemError::InvalidArgument
+        );
+
+        return -1;
+    }
+
+    TalonsFS::Node directory =
+        nodeTable->read(
+            descriptor->node
+        );
+
+    if (directory.type !=
+        TalonsFS::NodeType::Directory)
+    {
+        setFilesystemError(
+            FilesystemError::NotADirectory
+        );
+
+        return -1;
+    }
+
+    constexpr uint64_t entrySize =
+        sizeof(TalonsFS::DirectoryEntry);
+
+    if (directory.size % entrySize != 0)
+    {
+        setFilesystemError(
+            FilesystemError::CorruptFilesystem
+        );
+
+        return -1;
+    }
+
+    while (descriptor->offset <
+           directory.size)
+    {
+        const uint64_t offset =
+            descriptor->offset;
+
+        uint8_t entryBuf[entrySize];
+
+        uint64_t remaining = entrySize;
+        uint64_t currentOffset = offset;
+
+        uint8_t* destination = entryBuf;
+
+        while (remaining > 0)
+        {
+            const uint64_t blockIndex =
+                currentOffset / BLOCK_SIZE;
+
+            const uint64_t offsetInBlock =
+                currentOffset % BLOCK_SIZE;
+
+            if (blockIndex >=
+                directory.dataBlocks)
+            {
+                setFilesystemError(
+                    FilesystemError::CorruptFilesystem
+                );
+
+                return -1;
+            }
+
+            const uint64_t blockNumber =
+                directory.dataStart +
+                blockIndex;
+
+            uint8_t blockBuf[BLOCK_SIZE];
+
+            if (!dataBlockManager->read(
+                    blockNumber,
+                    blockBuf))
+            {
+                setFilesystemError(
+                    FilesystemError::DeviceError
+                );
+
+                return -1;
+            }
+
+            const uint64_t available =
+                BLOCK_SIZE - offsetInBlock;
+
+            const uint64_t bytesToCopy =
+                remaining < available
+                    ? remaining
+                    : available;
+
+            __builtin_memcpy(
+                destination,
+                blockBuf + offsetInBlock,
+                bytesToCopy
+            );
+
+            destination += bytesToCopy;
+            currentOffset += bytesToCopy;
+            remaining -= bytesToCopy;
+        }
+
+        descriptor->offset += entrySize;
+
+        TalonsFS::DirectoryEntry entry{};
+
+        __builtin_memcpy(
+            &entry,
+            entryBuf,
+            entrySize
+        );
+
+        if (entry.name[0] == '\0')
+        {
+            continue;
+        }
+
+        __builtin_memcpy(
+            out->name,
+            entry.name,
+            TalonsFS::MaxFilenameLength
+        );
+
+        out->name[
+            TalonsFS::MaxFilenameLength - 1
+        ] = '\0';
+
+        out->isDirectory =
+            (entry.type ==
+             static_cast<uint8_t>(
+                 TalonsFS::NodeType::Directory));
+
+        return 1;
+    }
+
+    return 0;
+}
+
 bool filesystem_create_pipe(
     int& readFd,
     int& writeFd
