@@ -22,10 +22,17 @@ extern "C" void kernel_main()
         vga_putchar_at(i, message[i], colour);
     }
 
-    if (!filesystem_init())
-{
-    return;
-}
+    const bool fsInitOk = filesystem_init();
+    const bool taloncOnline = fsInitOk && filesystem_is_mounted();
+
+    const char* taloncStatus = taloncOnline
+        ? "TalonC Compiler: ONLINE"
+        : "TalonC Compiler: OFFLINE";
+
+    if (!fsInitOk)
+    {
+        return;
+    }
 
     const char* fsStatus =
         filesystem_is_mounted()
@@ -36,6 +43,14 @@ extern "C" void kernel_main()
     {
         vga_putchar_at(80 + j, fsStatus[j], colour);
     }
+
+    int statusColumn = 80;
+    for (int k = 0; fsStatus[k] != '\0'; ++k)
+        ++statusColumn;
+
+    statusColumn += 2;
+    for (int k = 0; taloncStatus[k] != '\0'; ++k)
+        vga_putchar_at(statusColumn + k, taloncStatus[k], colour);
 
     standard_streams_init(23);
  

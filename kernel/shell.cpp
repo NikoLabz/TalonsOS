@@ -1,4 +1,6 @@
 #include "shell.h"
+#include "editor.h"
+#include "talonc.h"
 #include "vga.h"
 #include "terminal.h"
 #include "filesystem.h"
@@ -666,6 +668,33 @@ namespace
         const CommandContext& context)
     {
         const char* arg = nullptr;
+
+        if (command_matches(line, "talonc", &arg))
+        {
+            if (arg == nullptr || arg[0] == '\0')
+                stream_print_string(context.stderrFd,
+                    "Usage: talonc <filename.tal>\\n");
+            else
+                talonc_run(arg, context.stdoutFd, context.stderrFd);
+            return true;
+        }
+
+        if (command_matches(line, "talonedit", &arg))
+        {
+            if (arg == nullptr || arg[0] == '\0')
+            {
+                stream_print_string(
+                    context.stderrFd,
+                    "Usage: talonedit <filename>\n"
+                );
+            }
+            else
+            {
+                talonedit_run(arg);
+            }
+
+            return true;
+        }
 
         if (command_matches(
                 line,

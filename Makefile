@@ -48,7 +48,7 @@ TALONSFS_SRCS := node_table bitmap block_allocator node_allocator \
                   superblock_checksum
 
 KERNEL_SRCS := kernel block_device block_cache filesystem file_descriptor keyboard standard_streams \
-                pipe pipe_manager memory new_delete runtime_support shell terminal vga kernel_time
+                pipe pipe_manager memory new_delete runtime_support shell terminal editor talonc vga kernel_time
 
 KERNEL_OBJS := $(addprefix $(BUILD)/,$(addsuffix .o,$(KERNEL_SRCS)))
 TALONSFS_OBJS := $(addprefix $(BUILD)/talonsfs_,$(addsuffix .o,$(TALONSFS_SRCS)))
