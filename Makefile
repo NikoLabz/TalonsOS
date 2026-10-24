@@ -57,6 +57,7 @@ ENTRY_OBJ := $(BUILD)/entry.o
 KERNEL_BIN := $(BUILD)/kernel.bin
 KERNEL_FLAT := $(BUILD)/kernel_flat.bin
 BOOT_BIN := $(BUILD)/boot.bin
+STAGE2_BIN := $(BUILD)/stage2.bin
 DISK_IMG := $(BUILD)/disk.img
 MKTALONSFS := $(BUILD)/mkTalonsFS
 TEST_INTEGRITY := $(BUILD)/test_integrity
@@ -330,9 +331,14 @@ $(KERNEL_BIN): $(ENTRY_OBJ) $(KERNEL_OBJS) $(TALONSFS_OBJS) linker.ld
 $(KERNEL_FLAT): $(KERNEL_BIN)
 	$(OBJCOPY) -O binary $< $@
 
-$(BOOT_BIN): boot/boot.asm $(KERNEL_FLAT)
+$(BOOT_BIN): boot/boot.asm | $(BUILD)
+	$(AS) -f bin $< -o $@
+	test "$$(stat -c%s $@)" -eq 512
+
+$(STAGE2_BIN): boot/stage2.asm $(KERNEL_FLAT) | $(BUILD)
 	$(eval SECTORS := $(shell echo $$(( ($$(stat -c%s $(KERNEL_FLAT)) + 511) / 512 ))))
 	$(AS) -f bin -D KERNEL_SECTORS=$(SECTORS) $< -o $@
+	test "$$(stat -c%s $@)" -eq 2048
 
 # Host-side formatter tool. NOT freestanding — links against the
 # host C++ standard library, unlike everything above this line.
@@ -343,10 +349,11 @@ $(MKTALONSFS): $(TOOL_SRCS) | $(BUILD)
 # then mkTalonsFS formats and splices TalonsFS in starting at physical
 # block FILESYSTEM_START — see tools/mkTalonsFS.cpp for why this can't
 # just be a plain dd of a filesystem image at offset 0.
-$(DISK_IMG): $(BOOT_BIN) $(KERNEL_FLAT) $(MKTALONSFS)
+$(DISK_IMG): $(BOOT_BIN) $(STAGE2_BIN) $(KERNEL_FLAT) $(MKTALONSFS)
 	dd if=/dev/zero of=$@ bs=$(DISK_IMG_BYTES) count=1 2>/dev/null
 	dd if=$(BOOT_BIN) of=$@ conv=notrunc 2>/dev/null
-	dd if=$(KERNEL_FLAT) of=$@ bs=512 seek=1 conv=notrunc 2>/dev/null
+	dd if=$(STAGE2_BIN) of=$@ bs=512 seek=1 conv=notrunc 2>/dev/null
+	dd if=$(KERNEL_FLAT) of=$@ bs=512 seek=5 conv=notrunc 2>/dev/null
 	$(MKTALONSFS) $@
 
 # Normal run. The guest is allowed to actually reboot: `Byebye!` pulses the

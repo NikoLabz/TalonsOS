@@ -99,3 +99,22 @@ void vga_update_cursor(unsigned short position)
         : "a"(value), "Nd"(port)
     );
 }
+
+// Save and restore all 80x25 VGA text cells.
+void vga_save_screen(unsigned short* buffer)
+{
+    if (buffer == nullptr)
+        return;
+
+    for (int i = 0; i < 2000; ++i)
+        buffer[i] = video[i];
+}
+
+void vga_restore_screen(const unsigned short* buffer)
+{
+    if (buffer == nullptr)
+        return;
+
+    for (int i = 0; i < 2000; ++i)
+        video[i] = buffer[i];
+}
