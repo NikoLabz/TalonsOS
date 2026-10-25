@@ -72,6 +72,42 @@ inline bool validMap(const Header& header, const Entry* entries)
 
         return true;
     }
+
+    // Intersect an E820 entry with a requested address range.
+    // Both ranges use half-open intervals: [base, end).
+    inline bool usableIntersection(
+        const Entry& entry,
+        uint64_t rangeBase,
+        uint64_t rangeLength,
+        uint64_t& resultBase,
+        uint64_t& resultLength)
+    {
+        resultBase = 0;
+        resultLength = 0;
+
+        if (!isUsable(entry) || rangeLength == 0)
+            return false;
+
+        if (rangeBase > UINT64_MAX - rangeLength)
+            return false;
+
+        const uint64_t entryEnd = entry.base + entry.length;
+        const uint64_t rangeEnd = rangeBase + rangeLength;
+
+        const uint64_t start =
+            entry.base > rangeBase ? entry.base : rangeBase;
+
+        const uint64_t end =
+            entryEnd < rangeEnd ? entryEnd : rangeEnd;
+
+        if (start >= end)
+            return false;
+
+        resultBase = start;
+        resultLength = end - start;
+        return true;
+    }
+
 }
 bool e820_init();
 bool e820_is_valid();

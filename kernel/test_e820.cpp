@@ -66,5 +66,40 @@ int main()
     Header badRangeHeader{MAGIC, 1, ENTRY_SIZE, 0};
     assert(!validMap(badRangeHeader, badRange));
 
+    // Intersect a usable region with a requested range.
+    Entry region{0x200000, 0x400000, TYPE_USABLE, 1};
+
+    uint64_t resultBase = 0;
+    uint64_t resultLength = 0;
+
+    assert(usableIntersection(
+        region, 0x300000, 0x100000,
+        resultBase, resultLength));
+    assert(resultBase == 0x300000);
+    assert(resultLength == 0x100000);
+
+    // Partial overlap at the beginning.
+    assert(usableIntersection(
+        region, 0x100000, 0x200000,
+        resultBase, resultLength));
+    assert(resultBase == 0x200000);
+    assert(resultLength == 0x100000);
+
+    // No overlap.
+    assert(!usableIntersection(
+        region, 0x700000, 0x100000,
+        resultBase, resultLength));
+    assert(resultLength == 0);
+
+    // Reserved regions must never be considered usable.
+    assert(!usableIntersection(
+        reserved, 0x200000, 0x100000,
+        resultBase, resultLength));
+
+    // Overflowing requested ranges must be rejected.
+    assert(!usableIntersection(
+        region, UINT64_MAX - 7, 16,
+        resultBase, resultLength));
+
     return 0;
 }
