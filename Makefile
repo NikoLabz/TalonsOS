@@ -22,7 +22,7 @@ BUILD    := build
 
 CXXFLAGS := -m64 -ffreestanding -fno-exceptions -fno-rtti \
             -fno-stack-protector -mno-red-zone -mcmodel=small \
-            -mgeneral-regs-only \
+            -mgeneral-regs-only -Os \
             -Wall -Wextra -c
 INC      := -Ikernel -Ifilesystem/talonsfs/include
 
@@ -48,7 +48,7 @@ TALONSFS_SRCS := node_table bitmap block_allocator node_allocator \
                   superblock_checksum
 
 KERNEL_SRCS := kernel block_device block_cache filesystem file_descriptor keyboard standard_streams \
-pipe pipe_manager memory new_delete runtime_support shell terminal editor talonc vga kernel_time e820
+pipe pipe_manager memory new_delete runtime_support shell terminal editor talonc vga kernel_time e820 frame_allocator
 
 KERNEL_OBJS := $(addprefix $(BUILD)/,$(addsuffix .o,$(KERNEL_SRCS)))
 TALONSFS_OBJS := $(addprefix $(BUILD)/talonsfs_,$(addsuffix .o,$(TALONSFS_SRCS)))
