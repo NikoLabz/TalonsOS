@@ -108,6 +108,46 @@ inline bool validMap(const Header& header, const Entry* entries)
         return true;
     }
 
+    // Return true only if the requested range does not overlap
+    // any non-usable E820 entry. This is a basic overlap check,
+    // not yet a complete physical-memory allocation policy.
+    inline bool hasNoReservedOverlap(
+        const Header& header,
+        const Entry* entries,
+        uint64_t rangeBase,
+        uint64_t rangeLength)
+    {
+        if (!validHeader(header) || entries == nullptr ||
+            rangeLength == 0 ||
+            rangeBase > UINT64_MAX - rangeLength)
+            return false;
+
+        const uint64_t rangeEnd = rangeBase + rangeLength;
+
+        for (uint32_t i = 0; i < header.count; ++i)
+        {
+            const Entry& entry = entries[i];
+
+            if (entry.length == 0)
+                continue;
+
+            if (entry.base > UINT64_MAX - entry.length)
+                return false;
+
+            // Any non-usable entry takes precedence over a usable one.
+            if (entry.type == TYPE_USABLE &&
+                (entry.attributes & 1u) != 0)
+                continue;
+
+            const uint64_t entryEnd = entry.base + entry.length;
+
+            if (rangeBase < entryEnd && entry.base < rangeEnd)
+                return false;
+        }
+
+        return true;
+    }
+
 }
 bool e820_init();
 bool e820_is_valid();

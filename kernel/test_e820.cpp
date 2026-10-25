@@ -101,5 +101,30 @@ int main()
         region, UINT64_MAX - 7, 16,
         resultBase, resultLength));
 
+
+    // A disabled non-usable entry must still block overlapping memory.
+    Entry disabledReservedMap[] = {
+        {0x200000, 0x400000, TYPE_USABLE, 1},
+        {0x300000, 0x100000, 2, 0}
+    };
+    Header disabledReservedHeader{MAGIC, 2, ENTRY_SIZE, 0};
+    assert(!hasNoReservedOverlap(
+        disabledReservedHeader, disabledReservedMap,
+        0x300000, 0x100000));
+
+    // Reserved regions must block overlapping candidate ranges.
+    Entry overlapMap[] = {
+        {0x200000, 0x400000, TYPE_USABLE, 1},
+        {0x300000, 0x100000, 2, 1}
+    };
+    Header overlapHeader{MAGIC, 2, ENTRY_SIZE, 0};
+
+    assert(!hasNoReservedOverlap(
+        overlapHeader, overlapMap, 0x280000, 0x100000));
+    assert(hasNoReservedOverlap(
+        overlapHeader, overlapMap, 0x400000, 0x100000));
+    assert(!hasNoReservedOverlap(
+        overlapHeader, overlapMap, UINT64_MAX - 7, 16));
+
     return 0;
 }
