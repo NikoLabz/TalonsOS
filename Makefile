@@ -48,7 +48,7 @@ TALONSFS_SRCS := node_table bitmap block_allocator node_allocator \
                   superblock_checksum
 
 KERNEL_SRCS := kernel block_device block_cache filesystem file_descriptor keyboard standard_streams \
-                pipe pipe_manager memory new_delete runtime_support shell terminal editor talonc vga kernel_time
+pipe pipe_manager memory new_delete runtime_support shell terminal editor talonc vga kernel_time e820
 
 KERNEL_OBJS := $(addprefix $(BUILD)/,$(addsuffix .o,$(KERNEL_SRCS)))
 TALONSFS_OBJS := $(addprefix $(BUILD)/talonsfs_,$(addsuffix .o,$(TALONSFS_SRCS)))
@@ -91,6 +91,7 @@ TEST_FILESYSTEM := $(BUILD)/test_filesystem
 TEST_BLOCK_CACHE := $(BUILD)/test_block_cache
 TEST_BLOCK_CACHE_FULL := $(BUILD)/test_block_cache_full
 TEST_RTC := $(BUILD)/test_rtc
+TEST_E820 := $(BUILD)/test_e820
 TEST_NAVIGATION := $(BUILD)/test_navigation_regression
 TEST_DISK_IMG := $(BUILD)/test_disk.img
 
@@ -148,7 +149,7 @@ $(BUILD)/test_%: filesystem/talonsfs/src/test_%.cpp $(TALONSFS_HOST_SRCS) | $(BU
 	$(HOSTCXX) $(HOSTCXXFLAGS) $(HOSTINC) $< $(TALONSFS_HOST_SRCS) -o $@
 
 test: $(TEST_INTEGRITY) $(TEST_PERMISSIONS) $(TEST_FILESYSTEM) \
-      $(TEST_BLOCK_CACHE) $(TEST_BLOCK_CACHE_FULL) $(TEST_RTC) \
+      $(TEST_BLOCK_CACHE) $(TEST_BLOCK_CACHE_FULL) $(TEST_RTC) $(TEST_E820) \
       $(TEST_NAVIGATION) $(TEST_NODE_MANAGER) $(TEST_FILE_DESCRIPTOR) $(TEST_TALONSFS_UNIT_BINS)
 	./$(TEST_NODE_MANAGER)
 	./$(TEST_FILE_DESCRIPTOR)
@@ -158,6 +159,7 @@ test: $(TEST_INTEGRITY) $(TEST_PERMISSIONS) $(TEST_FILESYSTEM) \
 	./$(TEST_BLOCK_CACHE)
 	./$(TEST_BLOCK_CACHE_FULL)
 	./$(TEST_RTC)
+	./$(TEST_E820)
 	@# test_navigation_regression mutates its fixture disk in place
 	@# (creates directories/files as part of the test). Regenerate it
 	@# fresh here, unconditionally, rather than relying on Make's
@@ -267,6 +269,10 @@ $(TEST_BLOCK_CACHE_FULL): filesystem/talonsfs/src/test_block_cache_full.cpp \
 $(TEST_RTC): filesystem/talonsfs/src/test_rtc.cpp | $(BUILD)
 	$(HOSTCXX) $(HOSTCXXFLAGS) -Ikernel $< -o $@
 
+# E820 memory-map header and entry validation tests.
+$(TEST_E820): kernel/test_e820.cpp kernel/e820.h | $(BUILD)
+	$(HOSTCXX) $(HOSTCXXFLAGS) -Ikernel $< -o $@
+
 # Navigation/lifecycle regression test -- links the REAL
 # kernel/filesystem.cpp, kernel/terminal.cpp, kernel/shell.cpp and
 # kernel/block_cache.cpp (unmodified, exactly what QEMU boots) against
@@ -281,6 +287,7 @@ $(TEST_NAVIGATION): tests/test_navigation_regression.cpp \
                     tests/host_stubs/kernel_block_device_stub.cpp \
                     tests/host_stubs/vga_stub.cpp \
                     tests/host_stubs/keyboard_stub.cpp \
+                    tests/host_stubs/shell_command_stubs.cpp \
                     kernel/filesystem.cpp \
                     kernel/terminal.cpp \
                     kernel/shell.cpp \
@@ -305,6 +312,7 @@ $(TEST_NAVIGATION): tests/test_navigation_regression.cpp \
 		tests/host_stubs/kernel_block_device_stub.cpp \
 		tests/host_stubs/vga_stub.cpp \
 		tests/host_stubs/keyboard_stub.cpp \
+		tests/host_stubs/shell_command_stubs.cpp \
 		kernel/filesystem.cpp \
 		kernel/file_descriptor.cpp \
 		kernel/terminal.cpp \
