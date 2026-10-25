@@ -73,6 +73,25 @@ inline bool validMap(const Header& header, const Entry* entries)
         return true;
     }
 
+    // Return true if the entire requested range is inside one enabled
+    // usable E820 entry. This does not check other entries for conflicts.
+    inline bool usableContainsRange(
+        const Entry& entry,
+        uint64_t rangeBase,
+        uint64_t rangeLength)
+    {
+        if (!isUsable(entry) || rangeLength == 0)
+            return false;
+
+        if (rangeBase > UINT64_MAX - rangeLength)
+            return false;
+
+        const uint64_t entryEnd = entry.base + entry.length;
+        const uint64_t rangeEnd = rangeBase + rangeLength;
+
+        return rangeBase >= entry.base && rangeEnd <= entryEnd;
+    }
+
     // Intersect an E820 entry with a requested address range.
     // Both ranges use half-open intervals: [base, end).
     inline bool usableIntersection(
@@ -148,6 +167,24 @@ inline bool validMap(const Header& header, const Entry* entries)
         return true;
     }
 
+
+    // Check that a range fits inside a usable entry and overlaps no
+    // non-usable entry in the supplied E820 map.
+    // This does not normalise overlapping usable entries.
+    inline bool mapRangeIsUsable(
+        const Header& header,
+        const Entry* entries,
+        const Entry& usableEntry,
+        uint64_t rangeBase,
+        uint64_t rangeLength)
+    {
+        if (!validHeader(header) || entries == nullptr ||
+            !usableContainsRange(usableEntry, rangeBase, rangeLength))
+            return false;
+
+        return hasNoReservedOverlap(
+            header, entries, rangeBase, rangeLength);
+    }
 }
 bool e820_init();
 bool e820_is_valid();

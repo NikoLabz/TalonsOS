@@ -66,6 +66,24 @@ int main()
     Header badRangeHeader{MAGIC, 1, ENTRY_SIZE, 0};
     assert(!validMap(badRangeHeader, badRange));
 
+    // A range must be fully contained in one usable entry.
+    Entry containingRegion{0x200000, 0x400000, TYPE_USABLE, 1};
+
+    assert(usableContainsRange(containingRegion, 0x200000, 0x400000));
+    assert(usableContainsRange(containingRegion, 0x300000, 0x100000));
+    assert(usableContainsRange(containingRegion, 0x5FFFFF, 1));
+
+    // Ranges extending beyond either boundary must fail.
+    assert(!usableContainsRange(containingRegion, 0x1FFFFF, 2));
+    assert(!usableContainsRange(containingRegion, 0x5FFFFF, 2));
+    assert(!usableContainsRange(containingRegion, 0x700000, 0x100000));
+
+    // Invalid or overflowing requests must fail.
+    assert(!usableContainsRange(containingRegion, 0x300000, 0));
+    assert(!usableContainsRange(containingRegion, UINT64_MAX - 7, 16));
+    assert(!usableContainsRange(reserved, 0x200000, 0x100000));
+    assert(!usableContainsRange(disabled, 0x200000, 0x100000));
+
     // Intersect a usable region with a requested range.
     Entry region{0x200000, 0x400000, TYPE_USABLE, 1};
 
@@ -111,6 +129,26 @@ int main()
     assert(!hasNoReservedOverlap(
         disabledReservedHeader, disabledReservedMap,
         0x300000, 0x100000));
+
+    // Combined check: contained in usable RAM and no reserved overlap.
+    Entry combinedMap[] = {
+        {0x200000, 0x400000, TYPE_USABLE, 1},
+        {0x300000, 0x100000, 2, 1}
+    };
+    Header combinedHeader{MAGIC, 2, ENTRY_SIZE, 0};
+
+    assert(mapRangeIsUsable(
+        combinedHeader, combinedMap, combinedMap[0],
+        0x200000, 0x80000));
+    assert(!mapRangeIsUsable(
+        combinedHeader, combinedMap, combinedMap[0],
+        0x280000, 0x100000));
+    assert(!mapRangeIsUsable(
+        combinedHeader, combinedMap, combinedMap[0],
+        0x5FFFFF, 2));
+    assert(!mapRangeIsUsable(
+        combinedHeader, nullptr, combinedMap[0],
+        0x200000, 0x1000));
 
     // Reserved regions must block overlapping candidate ranges.
     Entry overlapMap[] = {

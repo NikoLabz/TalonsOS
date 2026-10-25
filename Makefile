@@ -92,6 +92,7 @@ TEST_BLOCK_CACHE := $(BUILD)/test_block_cache
 TEST_BLOCK_CACHE_FULL := $(BUILD)/test_block_cache_full
 TEST_RTC := $(BUILD)/test_rtc
 TEST_E820 := $(BUILD)/test_e820
+TEST_FRAME_ALLOCATOR := $(BUILD)/test_frame_allocator
 TEST_NAVIGATION := $(BUILD)/test_navigation_regression
 TEST_DISK_IMG := $(BUILD)/test_disk.img
 
@@ -149,7 +150,7 @@ $(BUILD)/test_%: filesystem/talonsfs/src/test_%.cpp $(TALONSFS_HOST_SRCS) | $(BU
 	$(HOSTCXX) $(HOSTCXXFLAGS) $(HOSTINC) $< $(TALONSFS_HOST_SRCS) -o $@
 
 test: $(TEST_INTEGRITY) $(TEST_PERMISSIONS) $(TEST_FILESYSTEM) \
-      $(TEST_BLOCK_CACHE) $(TEST_BLOCK_CACHE_FULL) $(TEST_RTC) $(TEST_E820) \
+      $(TEST_BLOCK_CACHE) $(TEST_BLOCK_CACHE_FULL) $(TEST_RTC) $(TEST_E820) $(TEST_FRAME_ALLOCATOR) \
       $(TEST_NAVIGATION) $(TEST_NODE_MANAGER) $(TEST_FILE_DESCRIPTOR) $(TEST_TALONSFS_UNIT_BINS)
 	./$(TEST_NODE_MANAGER)
 	./$(TEST_FILE_DESCRIPTOR)
@@ -160,6 +161,7 @@ test: $(TEST_INTEGRITY) $(TEST_PERMISSIONS) $(TEST_FILESYSTEM) \
 	./$(TEST_BLOCK_CACHE_FULL)
 	./$(TEST_RTC)
 	./$(TEST_E820)
+	./$(TEST_FRAME_ALLOCATOR)
 	@# test_navigation_regression mutates its fixture disk in place
 	@# (creates directories/files as part of the test). Regenerate it
 	@# fresh here, unconditionally, rather than relying on Make's
@@ -272,6 +274,9 @@ $(TEST_RTC): filesystem/talonsfs/src/test_rtc.cpp | $(BUILD)
 # E820 memory-map header and entry validation tests.
 $(TEST_E820): kernel/test_e820.cpp kernel/e820.h | $(BUILD)
 	$(HOSTCXX) $(HOSTCXXFLAGS) -Ikernel $< -o $@
+
+$(TEST_FRAME_ALLOCATOR): kernel/test_frame_allocator.cpp kernel/frame_allocator.cpp kernel/frame_allocator.h kernel/e820.h | $(BUILD)
+	$(HOSTCXX) $(HOSTCXXFLAGS) -Ikernel kernel/test_frame_allocator.cpp kernel/frame_allocator.cpp -o $@
 
 # Navigation/lifecycle regression test -- links the REAL
 # kernel/filesystem.cpp, kernel/terminal.cpp, kernel/shell.cpp and
