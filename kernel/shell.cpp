@@ -6,6 +6,7 @@
 #include "filesystem.h"
 #include "standard_streams.h"
 #include "file_descriptor.h"
+#include "keyboard.h"
 
 namespace
 {
@@ -29,6 +30,172 @@ namespace
         char inputFile[kfs::MAX_NAME_LEN];
         char outputFile[kfs::MAX_NAME_LEN];
     };
+
+
+    void talons_help_print(
+        const char* text)
+    {
+        for (unsigned int i = 0; text[i] != '\0'; ++i)
+            vga_putchar_at(
+                terminal_get_output_position() + i,
+                text[i],
+                0x07
+            );
+    }
+
+    void talons_help_screen_line(
+        unsigned short& position,
+        const char* text)
+    {
+        for (unsigned int i = 0; text[i] != '\0'; ++i)
+        {
+            if (position >= 2000)
+            {
+                vga_scroll(0x07);
+                position -= 80;
+            }
+
+            vga_putchar_at(position++, text[i], 0x07);
+        }
+
+        position = static_cast<unsigned short>(
+            ((position / 80) + 1) * 80
+        );
+    }
+
+    char talons_help_wait_key()
+    {
+        char key = 0;
+
+        while (key == 0)
+            key = keyboard_poll_char();
+
+        return key;
+    }
+
+    void talons_help_draw_menu(
+        const char* title,
+        const char* const* lines,
+        unsigned int count)
+    {
+        unsigned short screen[2000];
+        vga_save_screen(screen);
+
+        for (unsigned short i = 0; i < 2000; ++i)
+            vga_putchar_at(i, ' ', 0x07);
+
+        unsigned short position = 0;
+        talons_help_screen_line(position, "========================================");
+        talons_help_screen_line(position, "             TALONSOS HELP");
+        talons_help_screen_line(position, "========================================");
+        talons_help_screen_line(position, "");
+        talons_help_screen_line(position, title);
+        talons_help_screen_line(position, "");
+
+        for (unsigned int i = 0; i < count; ++i)
+            talons_help_screen_line(position, lines[i]);
+
+        talons_help_screen_line(position, "");
+        talons_help_screen_line(position, "Press Esc to return.");
+
+        vga_update_cursor(position);
+
+        while (talons_help_wait_key() != 27)
+        {
+            // Ignore other keys while reading this information page.
+        }
+
+        vga_restore_screen(screen);
+        vga_update_cursor(terminal_get_output_position());
+    }
+
+    void talons_help_run()
+    {
+        const char* const mainMenu[] = {
+            "1. Commands",
+            "2. Information",
+            "3. Error/Bug Help",
+            "",
+            "Choose 1, 2, or 3.",
+            "Press Esc to exit."
+        };
+
+        const char* const commands[] = {
+            "talonc <filename.tal> - Run TalonsC",
+            "talonedit <filename> - Open the editor",
+            "LiterallyFDs!@Server - List filesystem objects",
+            "MakeItYourself>:( <name> - Create directory",
+            "DontTouchMe <name> - Create file",
+            "TalonsRepair - Show repair development status"
+        };
+
+        const char* const information[] = {
+            "TalonsOS is your x86-64 operating system project.",
+            "TalonsFS provides filesystem support.",
+            "TalonsC runs .tal source files.",
+            "Some commands are still under development."
+        };
+
+        const char* const errors[] = {
+            "Unknown command: check the command spelling.",
+            "Filesystem error: check that TalonsFS is mounted.",
+            "Build failure: inspect the first compiler error.",
+            "For bugs, save the error output before changing code."
+        };
+
+        while (true)
+        {
+            unsigned short screen[2000];
+            vga_save_screen(screen);
+
+            for (unsigned short i = 0; i < 2000; ++i)
+                vga_putchar_at(i, ' ', 0x07);
+
+            unsigned short position = 0;
+            for (unsigned int i = 0;
+                 i < sizeof(mainMenu) / sizeof(mainMenu[0]);
+                 ++i)
+            {
+                talons_help_screen_line(position, mainMenu[i]);
+            }
+
+            vga_update_cursor(position);
+
+            char key = talons_help_wait_key();
+
+            if (key == 27)
+            {
+                vga_restore_screen(screen);
+                vga_update_cursor(terminal_get_output_position());
+                return;
+            }
+
+            vga_restore_screen(screen);
+
+            if (key == '1')
+                talons_help_draw_menu(
+                    "COMMANDS",
+                    commands,
+                    sizeof(commands) / sizeof(commands[0]));
+            else if (key == '2')
+                talons_help_draw_menu(
+                    "INFORMATION",
+                    information,
+                    sizeof(information) / sizeof(information[0]));
+            else if (key == '3')
+                talons_help_draw_menu(
+                    "ERROR / BUG HELP",
+                    errors,
+                    sizeof(errors) / sizeof(errors[0]));
+            else
+                talons_help_draw_menu(
+                    "INVALID SELECTION",
+                    (const char* const[]) {
+                        "Invalid selection. Choose 1, 2, or 3."
+                    },
+                    1);
+        }
+    }
 
     bool command_matches(
         const char* line,
@@ -668,6 +835,12 @@ namespace
         const CommandContext& context)
     {
         const char* arg = nullptr;
+
+        if (command_matches(line, "TalonsHelp", &arg))
+        {
+            talons_help_run();
+            return true;
+        }
 
         if (command_matches(line, "talonc", &arg))
         {
@@ -2102,6 +2275,19 @@ if (fd < 0)
                     "Formatting cancelled.\n"
                 );
             }
+
+            return true;
+        }
+
+        if (command_matches(
+                line,
+                "TalonsRepair",
+                &arg))
+        {
+            stream_print_string(
+                context.stdoutFd,
+                "This Command is still getting developed. Please wait!\n"
+            );
 
             return true;
         }
