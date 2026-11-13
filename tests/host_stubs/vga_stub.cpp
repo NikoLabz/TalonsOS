@@ -62,6 +62,30 @@ void vga_update_cursor(unsigned short position)
     lastCursorPosition = position;
 }
 
+void vga_save_screen(unsigned short* destination)
+{
+    if (!destination)
+        return;
+
+    for (unsigned int i = 0;
+         i < sizeof(videoBuffer) / sizeof(videoBuffer[0]); ++i)
+    {
+        destination[i] = videoBuffer[i];
+    }
+}
+
+void vga_restore_screen(const unsigned short* source)
+{
+    if (!source)
+        return;
+
+    for (unsigned int i = 0;
+         i < sizeof(videoBuffer) / sizeof(videoBuffer[0]); ++i)
+    {
+        videoBuffer[i] = source[i];
+    }
+}
+
 // ---- test-only accessors, not part of the real vga.h interface ----
 
 char test_vga_char_at(int cell)

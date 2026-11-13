@@ -230,20 +230,20 @@ A feature is not complete merely because a source file exists or the project bui
 
 # 🧠 PHASE 5 - MEMORY MANAGEMENT
 
-- [ ] Physical memory detection
-- [ ] Memory map
-- [ ] Physical memory manager
-- [ ] Page/frame allocator
+- [ ] Physical memory detection *(BIOS E820 collected by stage2.asm and validated by e820.cpp; M1 added `meminfo` totals. Host-tested; not yet boot-verified, so left unticked)*
+- [ ] Memory map *(M1: `memory_map.h` summary + `memmap` shell command. Host-tested; not yet boot-verified, so left unticked)*
+- [ ] Physical memory manager *(M2: stats, contiguous alloc, hint, `verify()`, frame 0 guard; host-tested, not yet boot-verified, so left unticked)*
+- [ ] Page/frame allocator *(M2: see above; zero-on-allocate deferred to M5)*
 - [ ] Virtual memory
 - [ ] Paging *(identity-mapped first 2 MiB exists in entry.asm as part of the long-mode transition; full paging/virtual memory support remains open)*
-- [x] Kernel heap *(memory.cpp: HEAP_START 0x100000, 1 MiB heap, fixed 256-slot allocation table)*
+- [x] Kernel heap *(M3: redesigned. heap.cpp core with in-heap headers, split/merge, canaries, poison, double-free detection; memory.cpp binds it to 0x100000, 1 MiB. The old fixed 256-slot table is gone. Host-tested; not yet boot-verified)*
 - [x] Kernel allocator *(kmalloc()/kfree() in memory.cpp; verify the current implementation before extending it)*
 - [ ] User-space memory
 - [ ] Memory protection
 - [ ] Memory debugging tools
-- [ ] Out-of-memory handling *(kmalloc() reportedly returns nullptr on exhaustion; call sites need auditing and reliable failure handling)*
-- [ ] Memory statistics
-- [ ] Heap corruption detection
+- [ ] Out-of-memory handling *(M3: kmalloc returns nullptr + counts OOM events + error handler hook; `operator new` is fatal on OOM, `new(std::nothrow)` returns nullptr; only talonc calls kmalloc directly and checks the result. Host-tested; frame-level OOM policy and final audit are M7, so left unticked)*
+- [ ] Memory statistics *(M2: frame statistics, M3: heap statistics, both in `meminfo`. Host-tested, not yet boot-verified, so left unticked)*
+- [ ] Heap corruption detection *(M3: header checksum, canaries, slack and free-block poison, `memory_check()`. Host-tested, not yet boot-verified, so left unticked)*
 - [ ] Page fault handling
 
 > **Cleanup note:** The earlier roadmap identified competing `kmalloc()` implementations in `kernel/memory.cpp` and an orphaned `kernel/allocator.cpp` / `allocator.h`. Verify whether those files still exist and whether they are compiled before deleting anything.

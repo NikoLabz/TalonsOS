@@ -1,126 +1,143 @@
 #include "memory.h"
 
+#include "heap.h"
+
 namespace
 {
+    // Kernel heap region: 1 MiB at 0x100000, inside the boot identity map
+    // and reserved from the frame allocator by kernel_main().
     constexpr std::size_t HEAP_START = 0x100000;
-    constexpr std::size_t HEAP_SIZE  = 0x100000;
-    constexpr std::size_t ALIGNMENT  = 16;
+    constexpr std::size_t HEAP_SIZE = 0x100000;
 
-    struct Allocation
+#ifdef TALONS_HOST_TEST
+    // Host unit tests cannot use a fixed physical address.
+    alignas(16) unsigned char hostHeap[HEAP_SIZE];
+
+    void* heapBase()
     {
-        void* address;
-        std::size_t size;
-        bool free;
-    };
-
-    constexpr std::size_t MAX_ALLOCATIONS = 256;
-
-    Allocation allocations[MAX_ALLOCATIONS];
-
-    std::size_t heap_position = 0;
-
-    bool align_up(std::size_t value, std::size_t& result)
+        return hostHeap;
+    }
+#else
+    void* heapBase()
     {
-        constexpr std::size_t MASK = ALIGNMENT - 1;
+        return reinterpret_cast<void*>(HEAP_START);
+    }
+#endif
 
-        if (value > static_cast<std::size_t>(-1) - MASK)
-        {
-            return false;
-        }
+    // Zero-initialised in .bss; valid (uninitialised) before memory_init().
+    talons_heap::Heap heap;
 
-        result = (value + MASK) & ~MASK;
-        return true;
+    void (*fatalHandler)(std::size_t) = nullptr;
+
+    bool ensureInitialised()
+    {
+        if (heap.isInitialised())
+            return true;
+
+        return heap.init(heapBase(), HEAP_SIZE);
     }
 }
 
 void memory_init()
 {
-    heap_position = 0;
-
-    for (std::size_t i = 0; i < MAX_ALLOCATIONS; ++i)
-    {
-        allocations[i].address = nullptr;
-        allocations[i].size = 0;
-        allocations[i].free = false;
-    }
+    heap.init(heapBase(), HEAP_SIZE);
 }
 
 void* kmalloc(std::size_t size)
 {
-    if (size == 0)
-    {
+    if (!ensureInitialised())
         return nullptr;
-    }
 
-    // Reuse a freed allocation when it is large enough.
-    for (std::size_t i = 0; i < MAX_ALLOCATIONS; ++i)
-    {
-        if (allocations[i].free &&
-            allocations[i].size >= size)
-        {
-            allocations[i].free = false;
-            return allocations[i].address;
-        }
-    }
-
-    // Find an unused allocation record.
-    std::size_t allocationIndex = MAX_ALLOCATIONS;
-
-    for (std::size_t i = 0; i < MAX_ALLOCATIONS; ++i)
-    {
-        if (allocations[i].address == nullptr)
-        {
-            allocationIndex = i;
-            break;
-        }
-    }
-
-    if (allocationIndex == MAX_ALLOCATIONS)
-    {
-        return nullptr;
-    }
-
-    // Round the allocation size up to a 16-byte boundary.
-    std::size_t aligned_size = 0;
-
-    if (!align_up(size, aligned_size))
-    {
-        return nullptr;
-    }
-
-    // Check available heap space without overflowing.
-    if (heap_position > HEAP_SIZE ||
-        aligned_size > HEAP_SIZE - heap_position)
-    {
-        return nullptr;
-    }
-
-    void* address =
-        reinterpret_cast<void*>(HEAP_START + heap_position);
-
-    heap_position += aligned_size;
-
-    allocations[allocationIndex].address = address;
-    allocations[allocationIndex].size = aligned_size;
-    allocations[allocationIndex].free = false;
-
-    return address;
+    return heap.allocate(size);
 }
 
 void kfree(void* ptr)
 {
-    if (ptr == nullptr)
+    if (ptr == nullptr || !ensureInitialised())
+        return;
+
+    heap.free(ptr);
+}
+
+bool memory_get_stats(talons_heap::Stats& out)
+{
+    out = talons_heap::Stats{};
+    if (!heap.isInitialised())
     {
+        return false;
+    }
+
+    return heap.getStats(out);
+}
+
+bool memory_check(talons_heap::CheckReport& out)
+{
+    out = talons_heap::CheckReport{};
+    if (!heap.isInitialised())
+    {
+        out.truncated = true;
+        return false;
+    }
+
+    return heap.check(out);
+}
+
+std::size_t memory_max_allocation()
+{
+    return ensureInitialised() ? heap.maxAllocation() : 0;
+}
+
+void memory_set_error_handler(talons_heap::ErrorHandler handler)
+{
+    heap.setErrorHandler(handler);
+}
+
+void memory_set_fatal_handler(void (*handler)(std::size_t))
+{
+    fatalHandler = handler;
+}
+
+[[noreturn]] void memory_halt_out_of_memory(std::size_t requested)
+{
+    (void)requested;
+#ifdef TALONS_HOST_TEST
+    __builtin_trap();
+#else
+    // Fixed direct VGA output: safe before heap initialisation and during
+    // allocator failure. Never route this through streams or formatting.
+    volatile unsigned short* screen =
+        reinterpret_cast<volatile unsigned short*>(0xB8000);
+    const char message[] = "KERNEL PANIC: OUT OF MEMORY";
+    for (std::size_t i = 0; message[i] != '\0'; ++i)
+        screen[24 * 80 + i] =
+            static_cast<unsigned short>(0x4F00 | message[i]);
+    for (;;)
+        asm volatile("cli; hlt");
+#endif
+}
+
+void memory_fatal_out_of_memory(std::size_t requested)
+{
+    // Re-entry guard: a fatal handler (or anything it calls) that runs out
+    // of memory again must not recurse into the handler. Single CPU and
+    // interrupts disabled, so a plain flag is sufficient.
+    static bool active = false;
+
+    if (active)
+        memory_halt_out_of_memory(requested);
+
+    active = true;
+
+    if (fatalHandler != nullptr)
+    {
+        fatalHandler(requested);
+        active = false;
         return;
     }
 
-    for (std::size_t i = 0; i < MAX_ALLOCATIONS; ++i)
-    {
-        if (allocations[i].address == ptr &&
-            !allocations[i].free)
-        {
-            allocations[i].free = true;
-            return;
-        }
-    }
+#ifdef TALONS_HOST_TEST
+    memory_halt_out_of_memory(requested);
+#else
+    memory_halt_out_of_memory(requested);
+#endif
 }

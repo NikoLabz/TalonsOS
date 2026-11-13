@@ -44,29 +44,64 @@ int main()
     void* reused_again = kmalloc(32);
     assert(reused_again == reused);
 
-    // 6. Exhaust the allocation records.
+    // 6. DELIBERATELY CHANGED in Phase 5 M3 (approved heap redesign).
+    //
+    // The old allocator kept at most 256 allocation records, so exactly
+    // 256 of 300 kmalloc(1) calls succeeded and the 257th failed even
+    // though the heap was nearly empty. That artificial limit is gone:
+    // allocation is now limited only by the heap size. Every one of the
+    // first 300 calls must succeed, and the heap must still fail safely
+    // (and recover) when it is genuinely full.
     memory_init();
 
-    std::size_t successful = 0;
-
-    for (std::size_t i = 0; i < 300; ++i)
     {
-        if (kmalloc(1) != nullptr)
+        static void* blocks[40000];
+        std::size_t successful = 0;
+
+        for (std::size_t i = 0; i < 300; ++i)
         {
+            blocks[i] = kmalloc(1);
+            assert(blocks[i] != nullptr);
             ++successful;
         }
-    }
 
-    assert(successful == 256);
-    assert(kmalloc(1) == nullptr);
+        assert(successful == 300);
+
+        // Keep going until the 1 MiB heap is really full.
+        while (successful < 40000)
+        {
+            void* block = kmalloc(1);
+            if (block == nullptr)
+                break;
+            blocks[successful++] = block;
+        }
+
+        assert(successful > 20000);      // ~48 bytes per kmalloc(1)
+        assert(successful < 40000);      // it did fill up
+        assert(kmalloc(1) == nullptr);   // full: safe failure
+
+        for (std::size_t i = 0; i < successful; ++i)
+            kfree(blocks[i]);
+
+        // Everything freed: the whole heap is available again.
+        void* everything = kmalloc(memory_max_allocation());
+        assert(everything != nullptr);
+        kfree(everything);
+    }
 
     // 7. Reinitialisation must reset allocator state.
     memory_init();
     assert(kmalloc(128) != nullptr);
 
     // 8. Heap exhaustion must fail safely.
+    //
+    // DELIBERATELY CHANGED in Phase 5 M3: block headers now live inside
+    // the heap, so a request for the full 1 MiB can no longer succeed.
+    // The largest possible single allocation is memory_max_allocation().
     memory_init();
-    void* entire_heap = kmalloc(1024 * 1024);
+    assert(kmalloc(1024 * 1024) == nullptr);
+    assert(kmalloc(memory_max_allocation() + 1) == nullptr);
+    void* entire_heap = kmalloc(memory_max_allocation());
     assert(entire_heap != nullptr);
     assert(kmalloc(1) == nullptr);
 

@@ -48,7 +48,7 @@ TALONSFS_SRCS := node_table bitmap block_allocator node_allocator \
                   superblock_checksum
 
 KERNEL_SRCS := kernel block_device block_cache filesystem file_descriptor keyboard standard_streams \
-pipe pipe_manager memory new_delete runtime_support shell terminal editor talonc vga kernel_time e820 frame_allocator
+pipe pipe_manager memory new_delete runtime_support shell terminal editor talonc vga kernel_time e820 frame_allocator paging meminfo heap exception
 
 KERNEL_OBJS := $(addprefix $(BUILD)/,$(addsuffix .o,$(KERNEL_SRCS)))
 TALONSFS_OBJS := $(addprefix $(BUILD)/talonsfs_,$(addsuffix .o,$(TALONSFS_SRCS)))
@@ -81,7 +81,7 @@ TOOL_SRCS := tools/mkTalonsFS.cpp \
              filesystem/talonsfs/src/time.cpp \
 	     filesystem/talonsfs/src/file_data_manager.cpp
 
-.PHONY: all run run-debug clean test
+.PHONY: all run run-debug clean test size-check
 
 all: $(DISK_IMG)
 
@@ -93,6 +93,16 @@ TEST_BLOCK_CACHE_FULL := $(BUILD)/test_block_cache_full
 TEST_RTC := $(BUILD)/test_rtc
 TEST_E820 := $(BUILD)/test_e820
 TEST_FRAME_ALLOCATOR := $(BUILD)/test_frame_allocator
+TEST_PAGING := $(BUILD)/test_paging
+TEST_EXCEPTION := $(BUILD)/test_exception
+TEST_MEMORY := $(BUILD)/test_memory
+TEST_MEMORY_MAP := $(BUILD)/test_memory_map
+TEST_MEMORY_FORMAT := $(BUILD)/test_memory_format
+TEST_MEMINFO := $(BUILD)/test_meminfo
+TEST_FRAME_HARDENING := $(BUILD)/test_frame_hardening
+TEST_HEAP := $(BUILD)/test_heap
+TEST_MEMORY_API := $(BUILD)/test_memory_api
+TEST_NEW_DELETE := $(BUILD)/test_new_delete
 TEST_NAVIGATION := $(BUILD)/test_navigation_regression
 TEST_DISK_IMG := $(BUILD)/test_disk.img
 
@@ -150,7 +160,9 @@ $(BUILD)/test_%: filesystem/talonsfs/src/test_%.cpp $(TALONSFS_HOST_SRCS) | $(BU
 	$(HOSTCXX) $(HOSTCXXFLAGS) $(HOSTINC) $< $(TALONSFS_HOST_SRCS) -o $@
 
 test: $(TEST_INTEGRITY) $(TEST_PERMISSIONS) $(TEST_FILESYSTEM) \
-      $(TEST_BLOCK_CACHE) $(TEST_BLOCK_CACHE_FULL) $(TEST_RTC) $(TEST_E820) $(TEST_FRAME_ALLOCATOR) \
+      $(TEST_BLOCK_CACHE) $(TEST_BLOCK_CACHE_FULL) $(TEST_RTC) $(TEST_E820) $(TEST_FRAME_ALLOCATOR) $(TEST_PAGING) $(TEST_EXCEPTION) \
+      $(TEST_MEMORY) $(TEST_MEMORY_MAP) $(TEST_MEMORY_FORMAT) $(TEST_MEMINFO) \
+      $(TEST_FRAME_HARDENING) $(TEST_HEAP) $(TEST_MEMORY_API) $(TEST_NEW_DELETE) \
       $(TEST_NAVIGATION) $(TEST_NODE_MANAGER) $(TEST_FILE_DESCRIPTOR) $(TEST_TALONSFS_UNIT_BINS)
 	./$(TEST_NODE_MANAGER)
 	./$(TEST_FILE_DESCRIPTOR)
@@ -162,6 +174,16 @@ test: $(TEST_INTEGRITY) $(TEST_PERMISSIONS) $(TEST_FILESYSTEM) \
 	./$(TEST_RTC)
 	./$(TEST_E820)
 	./$(TEST_FRAME_ALLOCATOR)
+	./$(TEST_PAGING)
+	./$(TEST_EXCEPTION)
+	./$(TEST_MEMORY)
+	./$(TEST_MEMORY_MAP)
+	./$(TEST_MEMORY_FORMAT)
+	./$(TEST_MEMINFO)
+	./$(TEST_FRAME_HARDENING)
+	./$(TEST_HEAP)
+	./$(TEST_MEMORY_API)
+	./$(TEST_NEW_DELETE)
 	@# test_navigation_regression mutates its fixture disk in place
 	@# (creates directories/files as part of the test). Regenerate it
 	@# fresh here, unconditionally, rather than relying on Make's
@@ -278,6 +300,57 @@ $(TEST_E820): kernel/test_e820.cpp kernel/e820.h | $(BUILD)
 $(TEST_FRAME_ALLOCATOR): kernel/test_frame_allocator.cpp kernel/frame_allocator.cpp kernel/frame_allocator.h kernel/e820.h | $(BUILD)
 	$(HOSTCXX) $(HOSTCXXFLAGS) -Ikernel kernel/test_frame_allocator.cpp kernel/frame_allocator.cpp -o $@
 
+# Paging translation arithmetic tests; no hardware access required.
+$(TEST_PAGING): kernel/test_paging.cpp kernel/paging.cpp kernel/paging.h \
+                kernel/paging_internal.h kernel/frame_allocator.cpp \
+                kernel/frame_allocator.h kernel/e820.h | $(BUILD)
+	$(HOSTCXX) $(HOSTCXXFLAGS) -DTALONS_PAGING_HOST_TEST -Ikernel \
+		kernel/test_paging.cpp kernel/paging.cpp kernel/frame_allocator.cpp -o $@
+
+$(TEST_EXCEPTION): kernel/test_exception.cpp kernel/exception.h | $(BUILD)
+	$(HOSTCXX) $(HOSTCXXFLAGS) -Ikernel $< -o $@
+
+# Phase 5 memory tests (host-side).
+# memory.cpp is built with -DTALONS_HOST_TEST so the kernel heap lives in
+# a static buffer instead of physical address 0x100000 (the redesigned
+# heap keeps its block headers inside the heap and therefore really
+# writes to it). test_memory existed in the tree but was not part of
+# `make test`; two of its assertions were changed deliberately in M3.
+HEAPDEPS := kernel/heap.cpp kernel/heap.h kernel/memory.cpp kernel/memory.h
+
+$(TEST_MEMORY): kernel/test_memory.cpp $(HEAPDEPS) | $(BUILD)
+	$(HOSTCXX) $(HOSTCXXFLAGS) -DTALONS_HOST_TEST -Ikernel kernel/test_memory.cpp kernel/memory.cpp kernel/heap.cpp -o $@
+
+# Heap core against ordinary buffers (no kernel dependencies).
+$(TEST_HEAP): kernel/test_heap.cpp kernel/heap.cpp kernel/heap.h | $(BUILD)
+	$(HOSTCXX) $(HOSTCXXFLAGS) -Ikernel kernel/test_heap.cpp kernel/heap.cpp -o $@
+
+$(TEST_MEMORY_API): kernel/test_memory_api.cpp $(HEAPDEPS) | $(BUILD)
+	$(HOSTCXX) $(HOSTCXXFLAGS) -DTALONS_HOST_TEST -Ikernel kernel/test_memory_api.cpp kernel/memory.cpp kernel/heap.cpp -o $@
+
+# Links the REAL kernel/new_delete.cpp (it replaces global operator new).
+$(TEST_NEW_DELETE): kernel/test_new_delete.cpp kernel/new_delete.cpp $(HEAPDEPS) | $(BUILD)
+	$(HOSTCXX) $(HOSTCXXFLAGS) -DTALONS_HOST_TEST -Ikernel kernel/test_new_delete.cpp kernel/new_delete.cpp kernel/memory.cpp kernel/heap.cpp -o $@
+
+$(TEST_MEMORY_MAP): kernel/test_memory_map.cpp kernel/memory_map.h kernel/e820.h | $(BUILD)
+	$(HOSTCXX) $(HOSTCXXFLAGS) -Ikernel kernel/test_memory_map.cpp -o $@
+
+$(TEST_MEMORY_FORMAT): kernel/test_memory_format.cpp kernel/memory_format.h | $(BUILD)
+	$(HOSTCXX) $(HOSTCXXFLAGS) -Ikernel kernel/test_memory_format.cpp -o $@
+
+# Phase 5 M2: this test #includes kernel/frame_allocator.cpp so it can
+# corrupt private state and check verify(); do not also link that file.
+$(TEST_FRAME_HARDENING): kernel/test_frame_hardening.cpp kernel/frame_allocator.cpp kernel/frame_allocator.h kernel/e820.h | $(BUILD)
+	$(HOSTCXX) $(HOSTCXXFLAGS) -Ikernel kernel/test_frame_hardening.cpp -o $@
+
+# Links the REAL meminfo.cpp and frame_allocator.cpp; the E820 accessors,
+# stream layer and _kernel_end are stubbed inside the test itself.
+$(TEST_MEMINFO): kernel/test_meminfo.cpp kernel/meminfo.cpp kernel/meminfo.h \
+                 kernel/frame_allocator.cpp kernel/frame_allocator.h \
+                 kernel/memory_map.h kernel/memory_format.h kernel/e820.h \
+                 $(HEAPDEPS) | $(BUILD)
+	$(HOSTCXX) $(HOSTCXXFLAGS) -DTALONS_HOST_TEST -Ikernel kernel/test_meminfo.cpp kernel/meminfo.cpp kernel/frame_allocator.cpp kernel/memory.cpp kernel/heap.cpp -o $@
+
 # Navigation/lifecycle regression test -- links the REAL
 # kernel/filesystem.cpp, kernel/terminal.cpp, kernel/shell.cpp and
 # kernel/block_cache.cpp (unmodified, exactly what QEMU boots) against
@@ -371,6 +444,10 @@ $(DISK_IMG): $(BOOT_BIN) $(STAGE2_BIN) $(KERNEL_FLAT) $(MKTALONSFS)
 
 # Normal run. The guest is allowed to actually reboot: `Byebye!` pulses the
 # 8042 reset line and QEMU restarts the machine as real hardware would.
+# Phase 5: verify the kernel still fits (image sectors and _kernel_end).
+size-check: $(KERNEL_BIN) $(KERNEL_FLAT)
+	tools/check_kernel_limits.sh $(KERNEL_BIN) $(KERNEL_FLAT)
+
 run: $(DISK_IMG)
 	qemu-system-x86_64 -drive format=raw,file=$(DISK_IMG),if=ide -boot order=c
 

@@ -1,12 +1,16 @@
 #include "shell.h"
 #include "editor.h"
 #include "talonc.h"
+#include "meminfo.h"
 #include "vga.h"
 #include "terminal.h"
 #include "filesystem.h"
 #include "standard_streams.h"
 #include "file_descriptor.h"
 #include "keyboard.h"
+
+extern "C" [[noreturn]] void exception_test_trigger_page_fault();
+extern "C" [[noreturn]] void memory_test_trigger_oom();
 
 namespace
 {
@@ -123,6 +127,11 @@ namespace
         const char* const commands[] = {
             "talonc <filename.tal> - Run TalonsC",
             "talonedit <filename> - Open the editor",
+            "meminfo - Show physical memory summary",
+            "memmap - Show BIOS E820 memory map",
+            "memcheck - Check PMM and heap integrity",
+            "oomtest - Trigger the controlled OOM panic",
+            "pfaulttest - Trigger the controlled page fault",
             "LiterallyFDs!@Server - List filesystem objects",
             "MakeItYourself>:( <name> - Create directory",
             "DontTouchMe <name> - Create file",
@@ -836,6 +845,25 @@ namespace
     {
         const char* arg = nullptr;
 
+        if (command_matches(line, "pfaulttest", &arg))
+        {
+            if (arg != nullptr && arg[0] != '\0')
+                stream_print_string(context.stderrFd,
+                    "Usage: pfaulttest\n");
+            else
+                exception_test_trigger_page_fault();
+            return true;
+        }
+
+        if (command_matches(line, "oomtest", &arg))
+        {
+            if (arg != nullptr && arg[0] != '\0')
+                stream_print_string(context.stderrFd, "Usage: oomtest\n");
+            else
+                memory_test_trigger_oom();
+            return true;
+        }
+
         if (command_matches(line, "TalonsHelp", &arg))
         {
             talons_help_run();
@@ -849,6 +877,36 @@ namespace
                     "Usage: talonc <filename.tal>\\n");
             else
                 talonc_run(arg, context.stdoutFd, context.stderrFd);
+            return true;
+        }
+
+        if (command_matches(line, "meminfo", &arg))
+        {
+            if (arg != nullptr && arg[0] != '\0')
+                stream_print_string(context.stderrFd,
+                    "Usage: meminfo\n");
+            else
+                meminfo_run(context.stdoutFd, context.stderrFd);
+            return true;
+        }
+
+        if (command_matches(line, "memmap", &arg))
+        {
+            if (arg != nullptr && arg[0] != '\0')
+                stream_print_string(context.stderrFd,
+                    "Usage: memmap\n");
+            else
+                memmap_run(context.stdoutFd, context.stderrFd);
+            return true;
+        }
+
+        if (command_matches(line, "memcheck", &arg))
+        {
+            if (arg != nullptr && arg[0] != '\0')
+                stream_print_string(context.stderrFd,
+                    "Usage: memcheck\n");
+            else
+                memcheck_run();
             return true;
         }
 

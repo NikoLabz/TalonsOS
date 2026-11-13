@@ -26,3 +26,17 @@ bool e820_is_valid()
 {
     return map_valid;
 }
+
+const talons_e820::Header* e820_header()
+{
+    return map_valid
+        ? reinterpret_cast<const talons_e820::Header*>(E820_HEADER_ADDRESS)
+        : nullptr;
+}
+
+const talons_e820::Entry* e820_entries()
+{
+    return map_valid
+        ? reinterpret_cast<const talons_e820::Entry*>(E820_ENTRIES_ADDRESS)
+        : nullptr;
+}

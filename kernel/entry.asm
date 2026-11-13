@@ -2,6 +2,12 @@ bits 32
 
 global _start
 extern kernel_main
+extern exception_init
+extern exception_dispatch
+
+global pml4_table
+global pdpt_table
+global page_directory
 
 ; Provided by linker.ld: the boundaries of the .bss section.
 extern __bss_start
@@ -101,15 +107,17 @@ _start:
     ; ========================================================
     ; PML4
     ; ========================================================
-
+    pml4_table:
     mov eax, 0x91003
     mov [0x90000], eax
 
+    mov eax, 0x90003
+    mov [0x90FF0], eax
 
     ; ========================================================
     ; PDPT
     ; ========================================================
-
+    pdpt_table:
     mov eax, 0x92003
     mov [0x91000], eax
 
@@ -124,10 +132,9 @@ _start:
     ; Bit 7 = Page Size
     ;
     ; 0x83 = 10000011b
-
+    page_directory:
     mov eax, 0x00000083
     mov [0x92000], eax
-
 
     ; ========================================================
     ; ENABLE PAE
@@ -155,6 +162,28 @@ _start:
 
     or eax, 1 << 8
 
+    ; Enable NX only when the processor advertises it. Paging will reject
+    ; NX mappings if EFER.NXE remains clear.
+    mov esi, eax
+    mov edi, edx
+    mov eax, 0x80000000
+    cpuid
+    cmp eax, 0x80000001
+    jb .no_nx
+    mov eax, 0x80000001
+    cpuid
+    test edx, 1 << 20
+    jz .no_nx
+    mov eax, esi
+    mov edx, edi
+    or eax, 1 << 11
+    jmp .write_efer
+.no_nx:
+    mov eax, esi
+    mov edx, edi
+.write_efer:
+
+    mov ecx, 0xC0000080
     wrmsr
 
 
@@ -294,6 +323,10 @@ long_mode:
 
 .ctors_done:
 
+    ; Install exception gates before entering C++ kernel code. This also
+    ; covers faults raised by global constructors above.
+    call exception_init
+
 
     ; ========================================================
     ; CALL C++ KERNEL
@@ -307,3 +340,104 @@ long_mode:
     cli
     hlt
     jmp .hang
+
+; CPU exception stubs for vectors 0..31.
+bits 64
+
+%macro ISR_NO_ERROR 1
+isr_%1:
+    push qword 0
+    push qword %1
+    jmp exception_common
+%endmacro
+
+%macro ISR_ERROR 1
+isr_%1:
+    push qword %1                 ; CPU already pushed its error code
+    jmp exception_common
+%endmacro
+
+ISR_NO_ERROR 0
+ISR_NO_ERROR 1
+ISR_NO_ERROR 2
+ISR_NO_ERROR 3
+ISR_NO_ERROR 4
+ISR_NO_ERROR 5
+ISR_NO_ERROR 6
+ISR_NO_ERROR 7
+ISR_ERROR    8
+ISR_NO_ERROR 9
+ISR_ERROR    10
+ISR_ERROR    11
+ISR_ERROR    12
+ISR_ERROR    13
+ISR_ERROR    14
+ISR_NO_ERROR 15
+ISR_NO_ERROR 16
+ISR_ERROR    17
+ISR_NO_ERROR 18
+ISR_NO_ERROR 19
+ISR_NO_ERROR 20
+ISR_ERROR    21
+ISR_NO_ERROR 22
+ISR_NO_ERROR 23
+ISR_NO_ERROR 24
+ISR_NO_ERROR 25
+ISR_NO_ERROR 26
+ISR_NO_ERROR 27
+ISR_NO_ERROR 28
+ISR_ERROR    29
+ISR_ERROR    30
+ISR_NO_ERROR 31
+
+exception_common:
+    cld
+    push rax
+    push rbx
+    push rcx
+    push rdx
+    push rbp
+    push rsi
+    push rdi
+    push r8
+    push r9
+    push r10
+    push r11
+    push r12
+    push r13
+    push r14
+    push r15
+    mov rdi, rsp
+    mov rsi, cr2                  ; capture before entering C++
+    mov rbx, rsp
+    and rsp, -16
+    call exception_dispatch
+
+    mov rsp, rbx
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop r11
+    pop r10
+    pop r9
+    pop r8
+    pop rdi
+    pop rsi
+    pop rbp
+    pop rdx
+    pop rcx
+    pop rbx
+    pop rax
+    add rsp, 16
+    iretq
+
+section .rodata
+align 8
+global exception_stub_table
+exception_stub_table:
+%assign vector 0
+%rep 32
+    dq isr_%+vector
+%assign vector vector+1
+%endrep

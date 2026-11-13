@@ -188,3 +188,8 @@ inline bool validMap(const Header& header, const Entry* entries)
 }
 bool e820_init();
 bool e820_is_valid();
+
+// Pointers to the validated boot E820 map, or nullptr if e820_init()
+// has not succeeded. Added in Phase 5 M1; existing functions unchanged.
+const talons_e820::Header* e820_header();
+const talons_e820::Entry* e820_entries();

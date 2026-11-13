@@ -1,4 +1,6 @@
 #include "frame_allocator.h"
+#include "paging.h"
+#include "paging_internal.h"
 #include "e820.h"
 #include "standard_streams.h"
 #include "memory.h"
@@ -9,9 +11,88 @@
 
 extern "C" char _kernel_end;
 
+namespace
+{
+    bool paging_runtime_test()
+    {
+        constexpr uint64_t TEST_ADDRESS = 0xFFFF900000000000ULL;
+        constexpr uint64_t MARKER = 0x504147494E475445ULL;
+        uint64_t frame = 0;
+        if (!talons_paging::mapNewPage(
+                TEST_ADDRESS, frame,
+                talons_paging::MAP_WRITABLE |
+                talons_paging::MAP_NO_EXECUTE))
+            return false;
+
+        volatile uint64_t* page =
+            reinterpret_cast<volatile uint64_t*>(TEST_ADDRESS);
+        bool ok = page[0] == 0 && page[511] == 0;
+        page[0] = MARKER;
+        ok = ok && page[0] == MARKER;
+
+        talons_paging::PageInfo info{};
+        ok = ok && talons_paging::queryPage(TEST_ADDRESS, info) &&
+             info.physicalAddress == frame &&
+             info.pageSize == talons_paging_internal::PAGE_SIZE;
+
+        if (!talons_paging::unmapPage(TEST_ADDRESS))
+            return false; // Keep the mapped frame allocated on cleanup failure.
+        return talons_frames::release(frame) && ok;
+    }
+
+    bool user_memory_runtime_test()
+    {
+        using namespace talons_paging;
+        const uint64_t kernelRoot = activeAddressSpace();
+        const size_t framesBefore = talons_frames::freeFrameCount();
+        AddressSpace testSpace{};
+        if (!createAddressSpace(testSpace)) return false;
+
+        uint64_t writableFrame = 0;
+        uint64_t readOnlyFrame = 0;
+        bool ok = mapUserPage(testSpace, USER_BASE, writableFrame,
+                              MAP_USER | MAP_WRITABLE | MAP_NO_EXECUTE);
+        ok = ok && mapUserPage(testSpace,
+                               USER_BASE + talons_paging_internal::PAGE_SIZE,
+                               readOnlyFrame, MAP_USER | MAP_NO_EXECUTE);
+
+        PageInfo info{};
+        ok = ok && queryAddressSpace(testSpace, USER_BASE, info) &&
+             (info.flags & MAP_USER) && (info.flags & MAP_WRITABLE) &&
+             (info.flags & MAP_NO_EXECUTE);
+        ok = ok && queryAddressSpace(testSpace,
+                                     USER_BASE + talons_paging_internal::PAGE_SIZE,
+                                     info) &&
+             (info.flags & MAP_USER) && !(info.flags & MAP_WRITABLE);
+        ok = ok && queryAddressSpace(testSpace, 0x100000, info) &&
+             !(info.flags & MAP_USER);
+
+        if (ok && activateAddressSpace(testSpace))
+        {
+            volatile uint64_t* userPage =
+                reinterpret_cast<volatile uint64_t*>(USER_BASE);
+            ok = userPage[0] == 0 && userPage[511] == 0;
+            userPage[0] = 0x5553455250414745ULL;
+            ok = ok && userPage[0] == 0x5553455250414745ULL;
+            ok = activateAddressSpace(AddressSpace{kernelRoot, true}) && ok;
+        }
+        else
+        {
+            ok = false;
+            (void)activateAddressSpace(AddressSpace{kernelRoot, true});
+        }
+
+        const bool destroyed = destroyAddressSpace(testSpace);
+        return destroyed && ok &&
+               talons_frames::freeFrameCount() == framesBefore;
+    }
+}
+
 extern "C" void kernel_main()
 {
     memory_init();
+
+    const bool pagingReady = talons_paging::init();
 
     const bool e820Valid = e820_init();
     bool framesReady = false;
@@ -34,56 +115,69 @@ extern "C" void kernel_main()
             *header, entries, reserved,
             sizeof(reserved) / sizeof(reserved[0]));
     }
+    const bool pagingVmReady =
+        pagingReady && framesReady && paging_runtime_test() &&
+        user_memory_runtime_test();
+    talons_heap::CheckReport heapReport{};
+    const bool allocatorIntegrity = framesReady && talons_frames::verify() &&
+                                    memory_check(heapReport);
 
-    const unsigned char colour = 0x0A;
+    constexpr unsigned char GREEN = 0x0A;
+    constexpr unsigned char RED = 0x0C;
 
-    const char* message = "TALONSOS KERNEL ONLINE.";
-
+    const char* message = "TALONSOS KERNEL ONLINE";
     for (int i = 0; message[i] != '\0'; ++i)
-        vga_putchar_at(i, message[i], colour);
-
-    const char* e820Status = e820Valid
-        ? "E820: VALID"
-        : "E820: INVALID";
-
-    for (int i = 0; e820Status[i] != '\0'; ++i)
-        vga_putchar_at(125 + i, e820Status[i], colour);
+        vga_putchar_at(i, message[i], GREEN);
 
     const bool fsInitOk = filesystem_init();
+    const bool fsReady = fsInitOk && filesystem_is_mounted();
+    const bool taloncReady = fsReady;
 
-    const char* framesStatus = framesReady
-        ? "Frames: ONLINE"
-        : "Frames: OFFLINE";
+    const char* testStatus = "TALONS SYSTEM TESTS: VALID";
+    const char* failedStatus = "TALONS SYSTEM TESTS: FAILED - ";
 
-    for (int i = 0; framesStatus[i] != '\0'; ++i)
-        vga_putchar_at(145 + i, framesStatus[i], colour);
+    if (pagingReady && pagingVmReady && allocatorIntegrity &&
+        e820Valid && framesReady &&
+        fsReady && taloncReady)
+    {
+        for (int i = 0; testStatus[i] != '\0'; ++i)
+            vga_putchar_at(80 + i, testStatus[i], GREEN);
+    }
+    else
+    {
+        int column = 80;
+        for (int i = 0; failedStatus[i] != '\0'; ++i)
+            vga_putchar_at(column++, failedStatus[i], RED);
 
-    const bool taloncOnline =
-        fsInitOk && filesystem_is_mounted();
+        bool firstFailure = true;
 
-    const char* taloncStatus = taloncOnline
-        ? "TalonC Compiler: ONLINE"
-        : "TalonC Compiler: OFFLINE";
+        auto addFailure = [&](const char* name)
+        {
+            if (!firstFailure)
+            {
+                vga_putchar_at(column++, ',', RED);
+                vga_putchar_at(column++, ' ', RED);
+            }
+
+            for (int i = 0; name[i] != '\0'; ++i)
+                vga_putchar_at(column++, name[i], RED);
+
+            firstFailure = false;
+        };
+
+        if (!pagingReady) addFailure("Paging");
+        if (pagingReady && framesReady && !pagingVmReady)
+            addFailure("Paging VM");
+        if (framesReady && !allocatorIntegrity)
+            addFailure("Memory integrity");
+        if (!e820Valid) addFailure("E820");
+        if (!framesReady) addFailure("Frames");
+        if (!fsReady) addFailure("TalonsFS");
+        if (!taloncReady) addFailure("TalonC");
+    }
 
     if (!fsInitOk)
         return;
-
-    const char* fsStatus = filesystem_is_mounted()
-        ? "TalonsFS: mounted"
-        : "TalonsFS: mount failed";
-
-    for (int j = 0; fsStatus[j] != '\0'; ++j)
-        vga_putchar_at(80 + j, fsStatus[j], colour);
-
-    int statusColumn = 80;
-
-    for (int k = 0; fsStatus[k] != '\0'; ++k)
-        ++statusColumn;
-
-    statusColumn += 2;
-
-    for (int k = 0; taloncStatus[k] != '\0'; ++k)
-        vga_putchar_at(statusColumn + k, taloncStatus[k], colour);
 
     standard_streams_init(23);
 

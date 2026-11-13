@@ -7,6 +7,16 @@ namespace
     size_t free_frames = 0;
     bool initialised = false;
 
+    // Phase 5 M2 state.
+    size_t managed_frames = 0;
+    // Invariant: no frame below search_hint is free.
+    size_t search_hint = 0;
+    uint64_t frames_allocated_total = 0;
+    uint64_t frames_released_total = 0;
+    uint64_t failed_allocations = 0;
+    uint64_t rejected_releases = 0;
+    uint64_t untracked_usable_bytes = 0;
+
     bool bit_is_set(const uint8_t* bits, size_t frame)
     {
         return (bits[frame / 8] &
@@ -23,6 +33,34 @@ namespace
     {
         bits[frame / 8] &=
             static_cast<uint8_t>(~(1u << (frame % 8)));
+    }
+
+    uint64_t saturating_add(uint64_t a, uint64_t b)
+    {
+        return a > UINT64_MAX - b ? UINT64_MAX : a + b;
+    }
+
+    // Lowest free frame at or after 'from', or MAX_FRAMES if none.
+    // Skips fully-allocated bytes eight frames at a time.
+    size_t find_free(size_t from)
+    {
+        size_t frame = from;
+
+        while (frame < talons_frames::MAX_FRAMES)
+        {
+            if (frame % 8 == 0 && bitmap[frame / 8] == 0xFF)
+            {
+                frame += 8;
+                continue;
+            }
+
+            if (!bit_is_set(bitmap, frame))
+                return frame;
+
+            ++frame;
+        }
+
+        return talons_frames::MAX_FRAMES;
     }
 
     void reserve_frame(size_t frame)
@@ -78,6 +116,13 @@ bool talons_frames::init(
 {
     initialised = false;
     free_frames = 0;
+    managed_frames = 0;
+    search_hint = 0;
+    frames_allocated_total = 0;
+    frames_released_total = 0;
+    failed_allocations = 0;
+    rejected_releases = 0;
+    untracked_usable_bytes = 0;
 
     for (size_t i = 0; i < BITMAP_SIZE; ++i)
     {
@@ -108,6 +153,17 @@ bool talons_frames::init(
             continue;
 
         const uint64_t entryEnd = entry.base + entry.length;
+
+        if (entryEnd > MAX_PHYSICAL_ADDRESS)
+        {
+            const uint64_t from = entry.base > MAX_PHYSICAL_ADDRESS
+                ? entry.base
+                : MAX_PHYSICAL_ADDRESS;
+
+            untracked_usable_bytes = saturating_add(
+                untracked_usable_bytes, entryEnd - from);
+        }
+
         const uint64_t first =
             entry.base / FRAME_SIZE +
             (entry.base % FRAME_SIZE != 0 ? 1 : 0);
@@ -156,6 +212,12 @@ bool talons_frames::init(
     for (size_t i = 0; i < reservedCount; ++i)
         reserve_range(reserved[i].base, reserved[i].length);
 
+    // Address 0 is allocate()'s failure value; it must never be handed out.
+    reserve_frame(0);
+
+    managed_frames = free_frames;
+    search_hint = 0;
+
     initialised = true;
     return true;
 }
@@ -165,37 +227,52 @@ uint64_t talons_frames::allocate()
     if (!initialised)
         return 0;
 
-    for (size_t frame = 0; frame < MAX_FRAMES; ++frame)
+    const size_t frame = find_free(search_hint);
+
+    if (frame >= MAX_FRAMES)
     {
-        if (!bit_is_set(bitmap, frame))
-        {
-            set_bit(bitmap, frame);
-            set_bit(allocated, frame);
-            --free_frames;
-            return static_cast<uint64_t>(frame) * FRAME_SIZE;
-        }
+        ++failed_allocations;
+        return 0;
     }
 
-    return 0;
+    set_bit(bitmap, frame);
+    set_bit(allocated, frame);
+    --free_frames;
+    ++frames_allocated_total;
+    search_hint = frame + 1;
+    return static_cast<uint64_t>(frame) * FRAME_SIZE;
 }
 
 bool talons_frames::release(uint64_t physicalAddress)
 {
-    if (!initialised ||
-        physicalAddress == 0 ||
+    if (!initialised)
+        return false;
+
+    if (physicalAddress == 0 ||
         physicalAddress % FRAME_SIZE != 0 ||
         physicalAddress >= MAX_PHYSICAL_ADDRESS)
+    {
+        ++rejected_releases;
         return false;
+    }
 
     const size_t frame =
         static_cast<size_t>(physicalAddress / FRAME_SIZE);
 
     if (!bit_is_set(allocated, frame))
+    {
+        ++rejected_releases;
         return false;
+    }
 
     clear_bit(allocated, frame);
     clear_bit(bitmap, frame);
     ++free_frames;
+    ++frames_released_total;
+
+    if (frame < search_hint)
+        search_hint = frame;
+
     return true;
 }
 
@@ -207,4 +284,195 @@ size_t talons_frames::freeFrameCount()
 bool talons_frames::isInitialised()
 {
     return initialised;
+}
+
+// ---------------------------------------------------------------------
+// Phase 5 M2 additions
+// ---------------------------------------------------------------------
+
+bool talons_frames::getStats(Stats& out)
+{
+    out = Stats{};
+
+    if (!initialised)
+        return false;
+
+    out.managedFrames = managed_frames;
+    out.freeFrames = free_frames;
+    out.allocatedFrames = managed_frames - free_frames;
+    out.framesAllocatedTotal = frames_allocated_total;
+    out.framesReleasedTotal = frames_released_total;
+    out.failedAllocations = failed_allocations;
+    out.rejectedReleases = rejected_releases;
+    out.untrackedUsableBytes = untracked_usable_bytes;
+
+    uint64_t run = 0;
+    uint64_t best = 0;
+
+    for (size_t frame = 0; frame < MAX_FRAMES; ++frame)
+    {
+        if (!bit_is_set(bitmap, frame))
+        {
+            ++run;
+            if (run > best)
+                best = run;
+        }
+        else
+        {
+            run = 0;
+        }
+    }
+
+    out.largestFreeRun = best;
+    return true;
+}
+
+uint64_t talons_frames::allocateContiguous(size_t count)
+{
+    if (!initialised || count == 0)
+        return 0;
+
+    if (count > MAX_FRAMES)
+    {
+        ++failed_allocations;
+        return 0;
+    }
+
+    size_t start = find_free(search_hint);
+    const size_t firstFree = start;
+
+    while (start < MAX_FRAMES)
+    {
+        size_t run = 1;
+
+        while (run < count &&
+               start + run < MAX_FRAMES &&
+               !bit_is_set(bitmap, start + run))
+            ++run;
+
+        if (run == count)
+        {
+            for (size_t i = 0; i < count; ++i)
+            {
+                set_bit(bitmap, start + i);
+                set_bit(allocated, start + i);
+            }
+
+            free_frames -= count;
+            frames_allocated_total += count;
+
+            // Frames below 'start' that were free before still are, so
+            // the hint may only advance past a run that began at the
+            // lowest free frame.
+            search_hint = (start == firstFree) ? start + count : firstFree;
+
+            return static_cast<uint64_t>(start) * FRAME_SIZE;
+        }
+
+        // Frame start+run is allocated/reserved, or the limit was hit.
+        start = find_free(start + run);
+    }
+
+    ++failed_allocations;
+    return 0;
+}
+
+bool talons_frames::releaseContiguous(
+    uint64_t physicalAddress, size_t count)
+{
+    if (!initialised)
+        return false;
+
+    if (count == 0 ||
+        physicalAddress == 0 ||
+        physicalAddress % FRAME_SIZE != 0 ||
+        physicalAddress >= MAX_PHYSICAL_ADDRESS ||
+        count > MAX_FRAMES ||
+        count > (MAX_PHYSICAL_ADDRESS - physicalAddress) / FRAME_SIZE)
+    {
+        ++rejected_releases;
+        return false;
+    }
+
+    const size_t first = static_cast<size_t>(physicalAddress / FRAME_SIZE);
+
+    // Validate the whole range before changing anything.
+    for (size_t i = 0; i < count; ++i)
+    {
+        if (!bit_is_set(allocated, first + i))
+        {
+            ++rejected_releases;
+            return false;
+        }
+    }
+
+    for (size_t i = 0; i < count; ++i)
+    {
+        clear_bit(allocated, first + i);
+        clear_bit(bitmap, first + i);
+    }
+
+    free_frames += count;
+    frames_released_total += count;
+
+    if (first < search_hint)
+        search_hint = first;
+
+    return true;
+}
+
+bool talons_frames::isAllocated(uint64_t physicalAddress)
+{
+    if (!initialised ||
+        physicalAddress % FRAME_SIZE != 0 ||
+        physicalAddress >= MAX_PHYSICAL_ADDRESS)
+        return false;
+
+    return bit_is_set(
+        allocated, static_cast<size_t>(physicalAddress / FRAME_SIZE));
+}
+
+bool talons_frames::isFree(uint64_t physicalAddress)
+{
+    if (!initialised ||
+        physicalAddress % FRAME_SIZE != 0 ||
+        physicalAddress >= MAX_PHYSICAL_ADDRESS)
+        return false;
+
+    return !bit_is_set(
+        bitmap, static_cast<size_t>(physicalAddress / FRAME_SIZE));
+}
+
+bool talons_frames::verify()
+{
+    if (!initialised)
+        return false;
+
+    size_t freeCount = 0;
+    size_t allocatedCount = 0;
+
+    for (size_t frame = 0; frame < MAX_FRAMES; ++frame)
+    {
+        const bool unavailable = bit_is_set(bitmap, frame);
+        const bool isAlloc = bit_is_set(allocated, frame);
+
+        if (isAlloc)
+        {
+            ++allocatedCount;
+
+            if (!unavailable)
+                return false;
+        }
+
+        if (!unavailable)
+        {
+            ++freeCount;
+
+            if (frame == 0 || frame < search_hint)
+                return false;
+        }
+    }
+
+    return freeCount == free_frames &&
+           freeCount + allocatedCount == managed_frames;
 }
